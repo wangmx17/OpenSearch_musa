@@ -1,0 +1,4 @@
+worker33067 slots=8
+worker33068 slots=8
+worker33069 slots=8
+worker33070 slots=8
