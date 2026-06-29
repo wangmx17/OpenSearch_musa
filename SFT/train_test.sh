@@ -16,44 +16,47 @@ pip install metrics -i https://pypi.tuna.tsinghua.edu.cn/simple
 # pip install peft==0.18.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 
-# ===================== Log timestamp (multi-node safe) =====================
-RUN_START_EPOCH="$(date +%s)"
-if [[ -z "${LOG_TIMESTAMP:-}" ]]; then
-  LOG_TIMESTAMP_FILE="${LOG_DIR}/CURRENT_LOG_TIMESTAMP"
+# ===================== Experiment ID (multi-node safe) =====================
+if [[ -z "${EXP_ID:-}" ]]; then
+  EXP_ID_FILE="${LOG_DIR}/CURRENT_EXP_ID"
   if [[ "${RANK:-0}" == "0" ]]; then
-    LOCK_DIR="${LOG_DIR}/.log_timestamp.lock"
+    LOCK_DIR="${LOG_DIR}/.exp_alloc.lock"
     until mkdir "${LOCK_DIR}" 2>/dev/null; do
       sleep 0.2
     done
     trap 'rm -rf "${LOCK_DIR}"' EXIT
-    LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-    while [[ -e "${LOG_DIR}/${LOG_TIMESTAMP}" ]]; do
-      LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S_%N)"
-    done
-    mkdir -p "${LOG_DIR}/${LOG_TIMESTAMP}"
-    echo "${LOG_TIMESTAMP}" > "${LOG_DIR}/${LOG_TIMESTAMP}/LOG_TIMESTAMP"
-    echo "${LOG_TIMESTAMP}" > "${LOG_TIMESTAMP_FILE}.tmp"
-    mv "${LOG_TIMESTAMP_FILE}.tmp" "${LOG_TIMESTAMP_FILE}"
+    EXP_ID="$(
+      find "${LOG_DIR}" -maxdepth 1 -type d -name 'exp_*' -printf '%f\n' 2>/dev/null \
+        | sed -n 's/^exp_\([0-9][0-9]*\)$/\1/p' \
+        | sort -n \
+        | tail -1
+    )"
+    EXP_ID="${EXP_ID:-0}"
+    EXP_ID="$((EXP_ID + 1))"
+    mkdir -p "${LOG_DIR}/exp_${EXP_ID}"
+    echo "${EXP_ID}" > "${LOG_DIR}/exp_${EXP_ID}/EXP_ID"
+    echo "${EXP_ID}" > "${EXP_ID_FILE}.tmp"
+    mv "${EXP_ID_FILE}.tmp" "${EXP_ID_FILE}"
     rm -rf "${LOCK_DIR}"
     trap - EXIT
   else
-    while [[ ! -s "${LOG_TIMESTAMP_FILE}" ]] || [[ "$(stat -c %Y "${LOG_TIMESTAMP_FILE}" 2>/dev/null || echo 0)" -lt "${RUN_START_EPOCH}" ]]; do
+    while [[ ! -s "${EXP_ID_FILE}" ]]; do
       sleep 0.2
     done
-    LOG_TIMESTAMP="$(cat "${LOG_TIMESTAMP_FILE}")"
+    EXP_ID="$(cat "${EXP_ID_FILE}")"
   fi
 fi
 
-EXP_LOG_DIR="${LOG_DIR}/${LOG_TIMESTAMP}"
-mkdir -p "${EXP_LOG_DIR}"
-DEBUG_LOG="${EXP_LOG_DIR}/rank_${RANK:-0}.log"
+EXP_LOG_DIR="${LOG_DIR}/exp_${EXP_ID}"
+mkdir -p "${EXP_LOG_DIR}/node_logs"
+DEBUG_LOG="${EXP_LOG_DIR}/debug_rank_${RANK:-0}.log"
 : > "${DEBUG_LOG}"
 exec > >(tee "${DEBUG_LOG}") 2>&1
 echo "[INFO] Writing debug log to ${DEBUG_LOG}"
-echo "[INFO] Log timestamp dir: ${EXP_LOG_DIR}"
+echo "[INFO] Experiment log dir: ${EXP_LOG_DIR}"
 
 # ===================== Distributed env =====================
-export WORLD_SIZE=${WORLD_SIZE:-1}
+export WORLD_SIZE=${WORLD_SIZE:-4}
 export RANK=${RANK:-0}
 export MASTER_ADDR=${MASTER_ADDR:-localhost}
 export MASTER_PORT=${MASTER_PORT:-34237}
@@ -143,7 +146,8 @@ export VECLIB_MAXIMUM_THREADS=1
 export GOMAXPROCS=8
 export TORCH_NUM_THREADS=1
 export ARROW_NUM_THREADS=1
-
+export PYTORCH_MUSA_ALLOC_CONF="expandable_segments:True"
+export TORCH_MCCL_AVOID_RECORD_STREAMS=1
 # ===================== Launch =====================
 echo "[INFO] Launching multi-node training"
 echo "       Master node: ${MASTER_ADDR}"
@@ -154,7 +158,7 @@ echo "       NODE_RANK: ${RANK}"
 export PYTHONPATH=/home/jd/OpenSearch-VL-main/SFT/src
 cd /home/jd/OpenSearch-VL-main/SFT
 
-YAML_CONFIG=/home/jd/OpenSearch-VL-main/SFT/examples/agentic_full/qwen3_vl_full_sft_8b.yaml
+YAML_CONFIG=/home/jd/OpenSearch-VL-main/SFT/examples/agentic_full/qwen3_vl_full_sft_30_3b.yaml
 DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${RANK}.debug.yaml"
 cp "${YAML_CONFIG}" "${DEBUG_YAML}"
 

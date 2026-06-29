@@ -2,118 +2,143 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/logs"
+PROJECT_ROOT="${SCRIPT_DIR}"
+LOG_DIR="${PROJECT_ROOT}/logs"
+
+# ===================== [MOD 1] hostfile 参数支持 =====================
+# 原来是写死 HOSTFILE=xxx
+HOSTFILE="${1:-${HOSTFILE:-${PROJECT_ROOT}/hostfile}}"
+
 mkdir -p "${LOG_DIR}"
 
-cd /home/jd/OpenSearch-VL-main/SFT
+pick_first_host() {
+  local file="$1"
+  [[ -f "${file}" ]] || return 1
+  awk 'NF {print $1; exit}' "${file}"
+}
 
-pip install -e ".[metrics,deepspeed]" -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install qwen-vl-utils pillow av decord torchvision flash-attn -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install swanlab==0.7.16 -i https://pypi.tuna.tsinghua.edu.cn/simple
-#pip install deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install metrics -i https://pypi.tuna.tsinghua.edu.cn/simple
-# pip install metrics
-# pip install peft==0.18.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
+# ===================== [MOD 2] auto launch 控制 =====================
+AUTO_LAUNCH="${AUTO_LAUNCH:-0}"
 
+# ===================== node utils =====================
+resolve_node_rank() {
+  local file="$1"
+  local host="${CURRENT_HOSTNAME:-}"
+  local rank=""
 
-# ===================== Experiment ID (multi-node safe) =====================
-if [[ -z "${EXP_ID:-}" ]]; then
-  EXP_ID_FILE="${LOG_DIR}/CURRENT_EXP_ID"
-  if [[ "${RANK:-0}" == "0" ]]; then
-    LOCK_DIR="${LOG_DIR}/.exp_alloc.lock"
-    until mkdir "${LOCK_DIR}" 2>/dev/null; do
-      sleep 0.2
-    done
-    trap 'rm -rf "${LOCK_DIR}"' EXIT
-    EXP_ID="$(
-      find "${LOG_DIR}" -maxdepth 1 -type d -name 'exp_*' -printf '%f\n' 2>/dev/null \
-        | sed -n 's/^exp_\([0-9][0-9]*\)$/\1/p' \
-        | sort -n \
-        | tail -1
-    )"
-    EXP_ID="${EXP_ID:-0}"
-    EXP_ID="$((EXP_ID + 1))"
-    mkdir -p "${LOG_DIR}/exp_${EXP_ID}"
-    echo "${EXP_ID}" > "${LOG_DIR}/exp_${EXP_ID}/EXP_ID"
-    echo "${EXP_ID}" > "${EXP_ID_FILE}.tmp"
-    mv "${EXP_ID_FILE}.tmp" "${EXP_ID_FILE}"
-    rm -rf "${LOCK_DIR}"
-    trap - EXIT
-  else
-    while [[ ! -s "${EXP_ID_FILE}" ]]; do
-      sleep 0.2
-    done
-    EXP_ID="$(cat "${EXP_ID_FILE}")"
+  if [[ -n "${NODE_RANK:-}" ]]; then
+    echo "${NODE_RANK}"
+    return 0
   fi
+
+  for rank in "${RANK:-}" "${SLURM_NODEID:-}" "${OMPI_COMM_WORLD_RANK:-}" "${PADDLE_TRAINER_ID:-}"; do
+    if [[ "${rank}" =~ ^[0-9]+$ ]]; then
+      echo "${rank}"
+      return 0
+    fi
+  done
+
+  if [[ -z "${host}" ]]; then
+    host="$(cat /etc/hostname 2>/dev/null || true)"
+  fi
+  host="${host%%.*}"
+
+  if [[ -f "${file}" ]]; then
+    rank="$(awk -v host="${host}" '
+      NF {
+        if ($1 == host) { print NR-1; exit }
+      }
+    ' "${file}")"
+    if [[ "${rank}" =~ ^[0-9]+$ ]]; then
+      echo "${rank}"
+      return 0
+    fi
+  fi
+
+  if [[ "${NNODES:-1}" == "1" ]]; then
+    echo "0"
+    return 0
+  fi
+
+  echo "[ERROR] Cannot resolve NODE_RANK for host '${host}'. Set NODE_RANK explicitly or fix HOSTFILE=${file}." >&2
+  return 1
+}
+
+resolve_nnodes() {
+  local file="$1"
+  if [[ -n "${NNODES:-}" ]]; then echo "${NNODES}"; return 0; fi
+  if [[ -f "${file}" ]]; then awk 'NF{c++}END{print c+0}' "${file}"; return 0; fi
+  echo "1"
+}
+
+# ===================== [MOD 3] 一键 SSH launcher =====================
+launch_cluster() {
+  local file="$1"
+  local master_addr="$2"
+  local master_port="$3"
+
+  local i=0
+  while read -r host; do
+    [[ -z "$host" ]] && continue
+
+    echo "[AUTO] launching rank=$i on $host"
+
+    ssh -o StrictHostKeyChecking=no "$host" \
+      "cd ${PROJECT_ROOT} && \
+       HOSTFILE=${file} \
+       MASTER_ADDR=${master_addr} \
+       MASTER_PORT=${master_port} \
+       NNODES=$(resolve_nnodes "$file") \
+       NODE_RANK=${i} \
+       AUTO_LAUNCH=0 \
+       SKIP_INSTALL=1 \
+       bash $0" &
+
+    i=$((i+1))
+  done < "$file"
+
+  wait
+}
+
+# ===================== install =====================
+cd "${PROJECT_ROOT}"
+
+if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
+  pip install -e ".[metrics,deepspeed]" -i https://pypi.tuna.tsinghua.edu.cn/simple
 fi
 
-EXP_LOG_DIR="${LOG_DIR}/exp_${EXP_ID}"
-mkdir -p "${EXP_LOG_DIR}/node_logs"
-DEBUG_LOG="${EXP_LOG_DIR}/debug_rank_${RANK:-0}.log"
-: > "${DEBUG_LOG}"
-exec > >(tee "${DEBUG_LOG}") 2>&1
-echo "[INFO] Writing debug log to ${DEBUG_LOG}"
-echo "[INFO] Experiment log dir: ${EXP_LOG_DIR}"
+# ===================== env =====================
+CURRENT_HOSTNAME="$(cat /etc/hostname 2>/dev/null || true)"
 
-# ===================== Distributed env =====================
-export WORLD_SIZE=${WORLD_SIZE:-4}
-export HOSTFILE=${HOSTFILE:-/home/jd/OpenSearch-VL-main/SFT/hostfile.txt}
-export MASTER_ADDR=${MASTER_ADDR:-10.121.33.67}
-export MASTER_PORT=${MASTER_PORT:-34237}
-export NPROC_PER_NODE=${NPROC_PER_NODE:-8}
+MASTER_ADDR="${MASTER_ADDR:-$(pick_first_host "${HOSTFILE}")}"
+MASTER_PORT="${MASTER_PORT:-34237}"
+NNODES="$(resolve_nnodes "${HOSTFILE}")"
+NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 
-# ===================== MCCL =====================
-export MUSA_LAUNCH_BLOCKING=1 
+echo "[INFO] MASTER_ADDR=$MASTER_ADDR"
+echo "[INFO] NNODES=$NNODES"
 
-export MUSA_EXECUTION_TIMEOUT="${MUSA_EXECUTION_TIMEOUT:-3200000}"
-export ACCELERATOR_BACKEND="${ACCELERATOR_BACKEND:-musa}"
+# ===================== [MOD 4] 一键入口 =====================
+if [[ "${AUTO_LAUNCH}" == "1" ]]; then
+  echo "[INFO] AUTO_LAUNCH enabled, starting cluster..."
+  launch_cluster "${HOSTFILE}" "${MASTER_ADDR}" "${MASTER_PORT}"
+  exit 0
+fi
 
-export MCCL_PROTOS="${MCCL_PROTOS:-2}"
-export MCCL_ALGOS="${MCCL_ALGOS:-1}"
-export MCCL_BUFFSIZE="${MCCL_BUFFSIZE:-20971520}"
-export MCCL_MAX_NCHANNELS="${MCCL_MAX_NCHANNELS:-14}"
-export MCCL_CHECK_POINTERS="${MCCL_CHECK_POINTERS:-0}"
-export MCCL_IB_GID_INDEX="${MCCL_IB_GID_INDEX:-3}"
-export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
-# ===================== Misc env =====================
-export NVTE_FP8=0
-export NVTE_DISABLE_FP8=1
-export NVTE_FUSED_ATTN=0
-export NVTE_LAYERNORM_FWD_USE_CUDNN=0
-export TORCHDYNAMO_DISABLE=1
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export VECLIB_MAXIMUM_THREADS=1
-export GOMAXPROCS=8
-export TORCH_NUM_THREADS=1
-export ARROW_NUM_THREADS=1
-export PYTORCH_MUSA_ALLOC_CONF="expandable_segments:True"
-export TORCH_MCCL_AVOID_RECORD_STREAMS=1
-# ===================== Launch =====================
-echo "[INFO] Launching multi-node training"
-echo "       Master node: ${MASTER_ADDR}"
-echo "       Nodes total: ${WORLD_SIZE}"
-echo "       GPUs per node: ${NPROC_PER_NODE}"
-#echo "       NODE_RANK: ${RANK}"
+NODE_RANK="$(resolve_node_rank "${HOSTFILE}")"
+echo "[INFO] NODE_RANK=$NODE_RANK"
 
-export PYTHONPATH=/home/jd/OpenSearch-VL-main/SFT/src
-cd /home/jd/OpenSearch-VL-main/SFT
+# ===================== distributed env =====================
+export NNODES NODE_RANK MASTER_ADDR MASTER_PORT NPROC_PER_NODE
 
-YAML_CONFIG=/home/jd/OpenSearch-VL-main/SFT/examples/agentic_full/qwen3_vl_full_sft_30_3b.yaml
-#DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${RANK}.debug.yaml"
-DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).debug.yaml"
-
-cp "${YAML_CONFIG}" "${DEBUG_YAML}"
-
-echo "[INFO] Using yaml: ${DEBUG_YAML}"
+# ===================== launch =====================
+YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/config.yaml}"
 
 FORCE_TORCHRUN=1 \
-RDZV_ID=opensearch-vl-sft \
-NNODES=$WORLD_SIZE \
-#NODE_RANK=$RANK \
-MASTER_ADDR=$MASTER_ADDR \
-MASTER_PORT=$MASTER_PORT \
-python -m llamafactory.cli train "${DEBUG_YAML}"
+NNODES="${NNODES}" \
+NODE_RANK="${NODE_RANK}" \
+MASTER_ADDR="${MASTER_ADDR}" \
+MASTER_PORT="${MASTER_PORT}" \
+NPROC_PER_NODE="${NPROC_PER_NODE}" \
+python -m llamafactory.cli train "${YAML_CONFIG}"
+
