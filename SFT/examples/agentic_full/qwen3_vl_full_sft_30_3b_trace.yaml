@@ -1,5 +1,5 @@
 ### model
-model_name_or_path: /home/jd/model/Qwen3-VL-30B-A3B-Instruct
+model_name_or_path: /data/bevformer_bk/liang.geng/jd_test/models/Qwen3-VL-30B-A3B-Instruct
 image_max_pixels: 262144
 video_max_pixels: 16384
 trust_remote_code: true
@@ -15,7 +15,7 @@ deepspeed: examples/deepspeed/ds_z3_config_change.json
 
 ### dataset
 dataset: new_fvqa_agent_sft,palace_agent_sft,webqa_agent_sft,livevqa_agent_sft,wikiart_agent_sft,wiki_zh_agent_sft,wiki_en_agent_sft
-dataset_dir: /home/jd/OpenSearch-VL-main/SFT/data
+dataset_dir: /data/bevformer_bk/liang.geng/jd_test/OpenSearch_VL/SFT/data
 template: qwen3_vl
 cutoff_len: 32000
 overwrite_cache: true
