@@ -231,6 +231,8 @@ export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
 export GOMAXPROCS="${GOMAXPROCS:-8}"
 export TORCH_NUM_THREADS="${TORCH_NUM_THREADS:-1}"
 export ARROW_NUM_THREADS="${ARROW_NUM_THREADS:-1}"
+export PYTORCH_MUSA_ALLOC_CONF="${PYTORCH_MUSA_ALLOC_CONF:-expandable_segments:True}"
+export TORCH_MCCL_AVOID_RECORD_STREAMS="${TORCH_MCCL_AVOID_RECORD_STREAMS:-1}"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 # ===================== Torch profiler trace =====================
@@ -279,4 +281,3 @@ MASTER_ADDR="${MASTER_ADDR}" \
 MASTER_PORT="${MASTER_PORT}" \
 NPROC_PER_NODE="${NPROC_PER_NODE}" \
 python -m llamafactory.cli train "${DEBUG_YAML}"
-
