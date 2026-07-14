@@ -529,38 +529,6 @@ def create_custom_optimizer(
     training_args: "TrainingArguments",
     finetuning_args: "FinetuningArguments",
 ) -> Optional["torch.optim.Optimizer"]:
-    if os.getenv("OPENSEARCH_USE_MUSA_FUSED_ADAMW", "0").lower() in ["true", "y", "1"]:
-        try:
-            from torch_musa.optim import FusedAdamW  # type: ignore
-        except Exception as exc:
-            logger.warning_rank0(f"Cannot import torch_musa.optim.FusedAdamW: {exc}. Falling back to default optimizer.")
-        else:
-            decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
-            decay_parameters = [name for name in decay_parameters if "bias" not in name]
-            optimizer_grouped_parameters = [
-                {
-                    "params": [
-                        param for name, param in model.named_parameters() if name in decay_parameters and param.requires_grad
-                    ],
-                    "weight_decay": training_args.weight_decay,
-                },
-                {
-                    "params": [
-                        param
-                        for name, param in model.named_parameters()
-                        if name not in decay_parameters and param.requires_grad
-                    ],
-                    "weight_decay": 0.0,
-                },
-            ]
-            logger.info_rank0("Using torch_musa.optim.FusedAdamW optimizer.")
-            return FusedAdamW(
-                optimizer_grouped_parameters,
-                lr=training_args.learning_rate,
-                betas=(training_args.adam_beta1, training_args.adam_beta2),
-                eps=training_args.adam_epsilon,
-            )
-
     if finetuning_args.use_galore:
         return _create_galore_optimizer(model, training_args, finetuning_args)
 

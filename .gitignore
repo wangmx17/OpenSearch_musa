@@ -1,0 +1,77 @@
+# --- macOS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+.Python
+
+# --- Virtual envs ---
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+env/
+ENV/
+
+# --- Test / type checking caches ---
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Local data / model artifacts (do NOT ship into the repo) ---
+checkpoints/
+ckpts/
+runs/
+wandb/
+outputs/
+logs/
+*.log
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+
+# --- IDE / OS ---
+*.bak
+*.tmp
+*.orig
+SFT/data/dataset_info.json
+SFT/data/WebQA/images
+SFT/data/WebQA/webqa_llama_factory_filtered.json
+SFT/data/new_fvqa/fvqa_llama_factory_clean.json
+SFT/data/new_fvqa/images
+SFT/data/new_livevqa/images
+SFT/data/new_livevqa/livevqa_llama_factory_filtered.json
+SFT/data/palace/images
+SFT/data/palace/palace_llama_factory_filtered.json
+SFT/data/wiki_en/images
+SFT/data/wiki_en/wiki_en_llama_factory_filtered.json
+SFT/data/wiki_zh/images
+SFT/data/wiki_zh/wiki_zh_llama_factory_filtered.json
+SFT/data/wikiart/images
+SFT/data/wikiart/wikiart_llama_factory_filtered.json
