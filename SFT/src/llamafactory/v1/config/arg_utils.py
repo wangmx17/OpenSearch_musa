@@ -17,7 +17,9 @@
 
 
 import json
-from enum import StrEnum, unique
+from enum import unique
+
+from llamafactory.extras.compat import StrEnum
 
 
 class PluginConfig(dict):

@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import time
-from enum import StrEnum, unique
+from enum import unique
+
+from llamafactory.extras.compat import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field

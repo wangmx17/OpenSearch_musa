@@ -27,7 +27,9 @@ Including:
 import os
 from collections.abc import Callable
 from contextlib import contextmanager
-from enum import StrEnum, unique
+from enum import unique
+
+from llamafactory.extras.compat import StrEnum
 from functools import lru_cache, wraps
 from typing import Optional
 

@@ -28,7 +28,7 @@ And data parallelism types:
 
 from dataclasses import dataclass
 from datetime import timedelta
-from enum import StrEnum
+from llamafactory.extras.compat import StrEnum
 from typing import Any, Optional
 
 from torch.distributed import barrier, destroy_process_group, init_process_group

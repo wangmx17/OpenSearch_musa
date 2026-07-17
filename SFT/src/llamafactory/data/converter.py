@@ -52,11 +52,21 @@ class DatasetConverter:
             medias = medias[:]
 
         if self.dataset_attr.load_from in ["script", "file"]:
+            dataset_media_dir = None
+            if self.dataset_attr.load_from == "file":
+                dataset_media_dir = os.path.join(
+                    self.data_args.dataset_dir, os.path.dirname(self.dataset_attr.dataset_name)
+                )
+
             if isinstance(medias[0], str):
                 for i in range(len(medias)):
-                    media_path = os.path.join(self.data_args.media_dir, medias[i])
-                    if os.path.isfile(media_path):
-                        medias[i] = media_path
+                    media_paths = [os.path.join(self.data_args.media_dir, medias[i])]
+                    if dataset_media_dir:
+                        media_paths.append(os.path.join(dataset_media_dir, medias[i]))
+
+                    resolved_path = next((path for path in media_paths if os.path.isfile(path)), None)
+                    if resolved_path:
+                        medias[i] = resolved_path
                     else:
                         logger.warning_rank0_once(
                             f"Media {medias[i]} does not exist in `media_dir`. Use original path."
@@ -65,9 +75,13 @@ class DatasetConverter:
                 # medias is a list of lists, e.g., [[frame1.jpg, frame2.jpg], [frame3.jpg, frame4.jpg]]
                 for i in range(len(medias)):
                     for j in range(len(medias[i])):
-                        media_path = os.path.join(self.data_args.media_dir, medias[i][j])
-                        if os.path.isfile(media_path):
-                            medias[i][j] = media_path
+                        media_paths = [os.path.join(self.data_args.media_dir, medias[i][j])]
+                        if dataset_media_dir:
+                            media_paths.append(os.path.join(dataset_media_dir, medias[i][j]))
+
+                        resolved_path = next((path for path in media_paths if os.path.isfile(path)), None)
+                        if resolved_path:
+                            medias[i][j] = resolved_path
                         else:
                             logger.warning_rank0_once(
                                 f"Media {medias[i][j]} does not exist in `media_dir`. Use original path."

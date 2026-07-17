@@ -28,7 +28,7 @@ from transformers import HfArgumentParser
 from transformers.integrations import is_deepspeed_zero3_enabled
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.training_args import ParallelMode
-from transformers.utils import is_torch_bf16_gpu_available, is_torch_npu_available
+from transformers.utils import is_torch_bf16_gpu_available, is_torch_musa_available, is_torch_npu_available
 
 from ..extras import logging
 from ..extras.constants import CHECKPOINT_NAMES, EngineName
@@ -360,7 +360,11 @@ def get_train_args(args: dict[str, Any] | list[str] | None = None) -> _TRAIN_CLS
         raise ValueError("Please use scripts/pissa_init.py to initialize PiSSA in DeepSpeed ZeRO-3.")
 
     if finetuning_args.pure_bf16:
-        if not (is_torch_bf16_gpu_available() or (is_torch_npu_available() and torch.npu.is_bf16_supported())):
+        if not (
+            is_torch_bf16_gpu_available()
+            or (is_torch_npu_available() and torch.npu.is_bf16_supported())
+            or (is_torch_musa_available() and torch.musa.is_bf16_supported())
+        ):
             raise ValueError("This device does not support `pure_bf16`.")
 
         if is_deepspeed_zero3_enabled():
@@ -507,6 +511,9 @@ def get_train_args(args: dict[str, Any] | list[str] | None = None) -> _TRAIN_CLS
         f"world size: {training_args.world_size}, device: {training_args.device}, "
         f"distributed training: {training_args.parallel_mode == ParallelMode.DISTRIBUTED}, "
         f"compute dtype: {str(model_args.compute_dtype)}"
+    )
+    logger.info_rank0(
+        f"Resolved seed config: seed={training_args.seed}, data_seed={getattr(training_args, 'data_seed', None)}"
     )
     transformers.set_seed(training_args.seed)
 

@@ -30,6 +30,7 @@ from transformers.utils import (
     is_torch_bf16_gpu_available,
     is_torch_cuda_available,
     is_torch_mps_available,
+    is_torch_musa_available,
     is_torch_npu_available,
     is_torch_xpu_available,
 )
@@ -38,9 +39,13 @@ from transformers.utils.versions import require_version
 from . import logging
 
 
-_is_fp16_available = is_torch_npu_available() or is_torch_cuda_available()
+_is_fp16_available = is_torch_npu_available() or is_torch_cuda_available() or is_torch_musa_available()
 try:
-    _is_bf16_available = is_torch_bf16_gpu_available() or (is_torch_npu_available() and torch.npu.is_bf16_supported())
+    _is_bf16_available = (
+        is_torch_bf16_gpu_available()
+        or (is_torch_npu_available() and torch.npu.is_bf16_supported())
+        or (is_torch_musa_available() and getattr(torch.musa, "is_bf16_supported", lambda: True)())
+    )
 except Exception:
     _is_bf16_available = False
 
@@ -151,6 +156,8 @@ def get_current_device() -> "torch.device":
         device = "mps:{}".format(os.getenv("LOCAL_RANK", "0"))
     elif is_torch_cuda_available():
         device = "cuda:{}".format(os.getenv("LOCAL_RANK", "0"))
+    elif is_torch_musa_available():
+        device = "musa:{}".format(os.getenv("LOCAL_RANK", "0"))
     else:
         device = "cpu"
 
@@ -167,6 +174,8 @@ def get_device_name() -> str:
         device = "mps"
     elif is_torch_cuda_available():
         device = "gpu"
+    elif is_torch_musa_available():
+        device = "musa"
     else:
         device = "cpu"
 
@@ -194,6 +203,8 @@ def get_device_count() -> int:
         return torch.mps.device_count()
     elif is_torch_cuda_available():
         return torch.cuda.device_count()
+    elif is_torch_musa_available():
+        return torch.musa.device_count()
     else:
         return 0
 
@@ -215,6 +226,8 @@ def get_current_memory() -> tuple[int, int]:
         return torch.mps.current_allocated_memory(), torch.mps.recommended_max_memory()
     elif is_torch_cuda_available():
         return torch.cuda.mem_get_info()
+    elif is_torch_musa_available() and hasattr(torch.musa, "mem_get_info"):
+        return torch.musa.mem_get_info()
     else:
         return 0, -1
 
@@ -229,6 +242,8 @@ def get_peak_memory() -> tuple[int, int]:
         return torch.mps.current_allocated_memory(), -1
     elif is_torch_cuda_available():
         return torch.cuda.max_memory_allocated(), torch.cuda.max_memory_reserved()
+    elif is_torch_musa_available():
+        return torch.musa.max_memory_allocated(), torch.musa.max_memory_reserved()
     else:
         return 0, -1
 
@@ -251,7 +266,11 @@ def infer_optim_dtype(model_dtype: Optional["torch.dtype"]) -> "torch.dtype":
 def is_accelerator_available() -> bool:
     r"""Check if the accelerator is available."""
     return (
-        is_torch_xpu_available() or is_torch_npu_available() or is_torch_mps_available() or is_torch_cuda_available()
+        is_torch_xpu_available()
+        or is_torch_npu_available()
+        or is_torch_mps_available()
+        or is_torch_cuda_available()
+        or is_torch_musa_available()
     )
 
 
@@ -289,6 +308,8 @@ def torch_gc() -> None:
         torch.mps.empty_cache()
     elif is_torch_cuda_available():
         torch.cuda.empty_cache()
+    elif is_torch_musa_available():
+        torch.musa.empty_cache()
 
 
 def try_download_model_from_other_hub(model_args: "ModelArguments") -> str:
