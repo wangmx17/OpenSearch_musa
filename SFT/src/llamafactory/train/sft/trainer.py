@@ -30,6 +30,7 @@ from ...extras import logging
 from ...extras.constants import IGNORE_INDEX
 from ..callbacks import SaveProcessorCallback
 from ..fp8_utils import configure_fp8_environment, patch_accelerator_for_fp8, verify_fp8_status
+from ..precision_debug import record_precision_loss
 from ..trainer_utils import create_custom_optimizer, create_custom_scheduler
 
 
@@ -157,9 +158,12 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
                 )
                 ref_logits = ref_outputs.logits
             outputs = model(**inputs)
-            return self.compute_loss_func(outputs, inputs["labels"], ref_logits)
+            result = self.compute_loss_func(outputs, inputs["labels"], ref_logits)
         else:
-            return super().compute_loss(model, inputs, *args, **kwargs)
+            result = super().compute_loss(model, inputs, *args, **kwargs)
+
+        record_precision_loss(self, inputs, result)
+        return result
 
     @override
     def prediction_step(

@@ -23,7 +23,13 @@ from transformers import EarlyStoppingCallback, PreTrainedModel
 from ..data import get_template_and_fix_tokenizer
 from ..extras import logging
 from ..extras.constants import V_HEAD_SAFE_WEIGHTS_NAME, V_HEAD_WEIGHTS_NAME
-from ..extras.misc import find_available_port, get_device_name, get_torch_device, infer_optim_dtype
+from ..extras.misc import (
+    find_available_port,
+    get_device_name,
+    get_torch_device,
+    infer_optim_dtype,
+    is_env_enabled,
+)
 from ..extras.packages import (
     is_hyper_parallel_available,
     is_mcore_adapter_available,
@@ -32,10 +38,11 @@ from ..extras.packages import (
 )
 from ..hparams import RayArguments, get_infer_args, get_ray_args, get_train_args, read_args
 from ..model import load_model, load_tokenizer
-from .callbacks import LogCallback, PissaConvertCallback, ReporterCallback
+from .callbacks import LogCallback, MusaProfilerCallback, PissaConvertCallback, ReporterCallback
 from .dpo import run_dpo
 from .kto import run_kto
 from .ppo import run_ppo
+from .precision_debug import MusaNanInfTrackerCallback, PrecisionDebugCallback
 from .pt import run_pt
 from .rm import run_rm
 from .sft import run_sft
@@ -65,6 +72,13 @@ def _training_function(config: dict[str, Any]) -> None:
     model_args, data_args, training_args, finetuning_args, generating_args = get_train_args(args)
 
     callbacks.append(LogCallback())
+    if is_env_enabled("OPENSEARCH_TRACE"):
+        callbacks.append(MusaProfilerCallback())
+
+    if is_env_enabled("OPENSEARCH_PRECISION_DEBUG"):
+        callbacks.append(PrecisionDebugCallback())
+    if is_env_enabled("OPENSEARCH_NAN_INF_TRACKER"):
+        callbacks.append(MusaNanInfTrackerCallback())
     if finetuning_args.pissa_convert:
         callbacks.append(PissaConvertCallback())
 

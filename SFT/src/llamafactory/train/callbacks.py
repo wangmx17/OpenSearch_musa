@@ -50,6 +50,88 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)
 
 
+class MusaProfilerCallback(TrainerCallback):
+    r"""Collect a scheduled PyTorch profiler trace on selected MUSA ranks."""
+
+    def __init__(self) -> None:
+        self.profiler: Optional[Any] = None
+        self.rank = int(os.getenv("RANK", os.getenv("LOCAL_RANK", "0")))
+
+    @staticmethod
+    def _get_int_env(name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(name, str(default))
+        try:
+            value = int(raw_value)
+        except ValueError as err:
+            raise ValueError(f"{name} must be an integer, got: {raw_value!r}.") from err
+
+        if value < minimum:
+            raise ValueError(f"{name} must be at least {minimum}, got: {value}.")
+
+        return value
+
+    def _is_selected_rank(self) -> bool:
+        configured_ranks = os.getenv("OPENSEARCH_TRACE_RANKS", "0").strip().lower()
+        if configured_ranks in {"all", "*"}:
+            return True
+
+        if not configured_ranks:
+            raise ValueError("OPENSEARCH_TRACE_RANKS must contain a rank list, 'all', or '*'.")
+
+        try:
+            selected_ranks = {int(rank.strip()) for rank in configured_ranks.split(",")}
+        except ValueError as err:
+            raise ValueError(
+                f"OPENSEARCH_TRACE_RANKS must be a comma-separated integer list, got: {configured_ranks!r}."
+            ) from err
+
+        return self.rank in selected_ranks
+
+    @override
+    def on_train_begin(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if not self._is_selected_rank():
+            return
+
+        try:
+            __import__("torch_musa")
+            musa_activity = torch.profiler.ProfilerActivity.MUSA  # type: ignore[attr-defined]
+        except (AttributeError, ImportError) as err:
+            raise RuntimeError("OPENSEARCH_TRACE requires torch_musa with MUSA profiler support.") from err
+
+        wait = self._get_int_env("OPENSEARCH_TRACE_WAIT", 1)
+        warmup = self._get_int_env("OPENSEARCH_TRACE_WARMUP", 1)
+        active = self._get_int_env("OPENSEARCH_TRACE_ACTIVE", 3, minimum=1)
+        repeat = self._get_int_env("OPENSEARCH_TRACE_REPEAT", 1)
+        trace_dir = os.path.abspath(os.getenv("OPENSEARCH_TRACE_DIR", os.path.join(args.output_dir, "trace")))
+        os.makedirs(trace_dir, exist_ok=True)
+
+        worker_name = f"{os.getenv('HOSTNAME', 'worker')}_rank{self.rank}"
+        self.profiler = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, musa_activity],
+            schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=repeat),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir, worker_name=worker_name),
+            with_stack=is_env_enabled("OPENSEARCH_TRACE_WITH_STACK", "1"),
+            record_shapes=is_env_enabled("OPENSEARCH_TRACE_RECORD_SHAPES", "1"),
+            profile_memory=is_env_enabled("OPENSEARCH_TRACE_PROFILE_MEMORY"),
+            with_flops=is_env_enabled("OPENSEARCH_TRACE_WITH_FLOPS"),
+        )
+        self.profiler.start()
+        logger.info(f"MUSA profiler enabled on rank {self.rank}; trace directory: {trace_dir}.")
+
+    @override
+    def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if self.profiler is not None:
+            self.profiler.step()
+
+    @override
+    def on_train_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if self.profiler is not None:
+            try:
+                self.profiler.stop()
+            finally:
+                self.profiler = None
+
+
 def fix_valuehead_checkpoint(
     model: "AutoModelForCausalLMWithValueHead", output_dir: str, safe_serialization: bool
 ) -> None:

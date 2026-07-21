@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from transformers import Seq2SeqTrainingArguments
@@ -94,6 +96,24 @@ class TrainingArguments(Fp8Arguments, RayArguments, BaseTrainingArguments):
         default=False,
         metadata={"help": "deprecated"},
     )
+
+    @contextmanager
+    def main_process_first(self, local: bool = True, desc: str = "work") -> Generator[None, None, None]:
+        r"""Run the main process first without letting MCCL guess a device from the global rank."""
+        distributed_state = getattr(self, "distributed_state", None)
+        if distributed_state is not None:
+            process_first = getattr(
+                distributed_state,
+                "local_main_process_first" if local else "main_process_first",
+                None,
+            )
+            if process_first is not None:
+                with process_first():
+                    yield
+                return
+
+        with super().main_process_first(local=local, desc=desc):
+            yield
 
     def __post_init__(self):
         RayArguments.__post_init__(self)

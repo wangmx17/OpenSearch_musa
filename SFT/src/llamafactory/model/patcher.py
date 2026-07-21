@@ -140,6 +140,10 @@ def patch_config(
     configure_longlora(config, model_args, is_trainable)
     configure_quantization(config, tokenizer, model_args, is_trainable, init_kwargs)
     configure_moe(config, model_args, is_trainable)
+    if model_args.experts_implementation is not None:
+        init_kwargs["experts_implementation"] = model_args.experts_implementation
+        logger.info_rank0(f"Using {model_args.experts_implementation} experts implementation.")
+
     configure_visual_model(config)
     configure_kv_cache(config, model_args, is_trainable)
 

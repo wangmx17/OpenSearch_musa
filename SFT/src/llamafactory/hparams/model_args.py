@@ -142,6 +142,15 @@ class BaseModelArguments:
         default=None,
         metadata={"help": "Coefficient of the auxiliary router loss in mixture-of-experts model."},
     )
+    experts_implementation: Literal["eager", "grouped_mm", "batched_mm"] | None = field(
+        default="grouped_mm",
+        metadata={
+            "help": (
+                "Experts implementation used by supported Transformers MoE models. "
+                "Choose from eager, grouped_mm, or batched_mm."
+            )
+        },
+    )
     disable_gradient_checkpointing: bool = field(
         default=False,
         metadata={"help": "Whether or not to disable gradient checkpointing."},

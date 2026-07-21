@@ -1,8 +1,9 @@
 ### model
-model_name_or_path: /data/bevformer_bk/liang.geng/jd_test/models/Qwen3-VL-30B-A3B-Instruct
+model_name_or_path: /data/share/liang.geng/jd_test/models/Qwen3-VL-30B-A3B-Instruct/
 image_max_pixels: 262144
 video_max_pixels: 16384
 trust_remote_code: true
+# experts_implementation: eager # eager, grouped_mm
 
 ### method
 stage: sft
@@ -11,11 +12,12 @@ finetuning_type: full
 freeze_vision_tower: false
 freeze_multi_modal_projector: false
 flash_attn: fa2
+# flash_attn: sdpa
 deepspeed: examples/deepspeed/ds_z3_config_change.json
 
 ### dataset
 dataset: new_fvqa_agent_sft,palace_agent_sft,webqa_agent_sft,livevqa_agent_sft,wikiart_agent_sft,wiki_zh_agent_sft,wiki_en_agent_sft
-dataset_dir: /data/bevformer_bk/liang.geng/jd_test/OpenSearch_VL/SFT/data
+dataset_dir: /data/share/liang.geng/jd_test/OpenSearch_VL/SFT/data
 template: qwen3_vl
 cutoff_len: 32000
 overwrite_cache: true
@@ -24,7 +26,8 @@ dataloader_num_workers: 4
 
 ### output
 output_dir: saves/qwen3_vl_30b_a3b/full/sft_agent
-logging_steps: 5
+logging_steps: 1
+logging_nan_inf_filter: false
 save_steps: 200
 plot_loss: true
 overwrite_output_dir: true
