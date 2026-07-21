@@ -39,6 +39,32 @@
 
 ---
 
+## MUSA develop
+基于MUSA软件栈的适配版本，当前分支默认基于musa tollkits 5.2.0及torch_musa 2.9.1测试通过
+* DeepSpeed：https://github.com/gliangMT/DeepSpeed
+* docker image: sh-harbor.mthreads.com/mcctest/musa-train:v2.9.1.post1-deb_2026-07-10
+
+```bash
+# install dependencies
+cd OpenSearch_VL/SFT
+pip install -e ./
+
+# prepare datasets , needs check and verify the datasets path in actual env on link_dataset.sh scripts 
+cd OpenSearch_VL/SFT/scripts
+bash link_dataset.sh
+
+# edit hostfile
+vim hostfile
+
+# start the training 
+bash train_30b_trace.sh hostfile
+
+# stop training
+bash stop_all.sh hostfile
+
+```
+
+
 ## 📖 Introduction
 
 **OpenSearch-VL** is a fully open recipe for training frontier multimodal deep-research agents with agentic reinforcement learning. In contrast to standard VLMs that answer in a single forward pass, the agent operates as a closed loop: it inspects the image, crops or enhances the regions of interest, issues web and image searches, visits the retrieved pages, and only then writes an answer grounded in the gathered evidence.

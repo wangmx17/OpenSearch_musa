@@ -26,7 +26,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DATA_DIR="${DATA_DIR:-${PROJECT_ROOT}/data}"
-SOURCE_ROOT="${SOURCE_ROOT:-/home/jd/OpenSearch-VL-Search-VL-SFT-36K}"
+SOURCE_ROOT="${SOURCE_ROOT:-/home/jd/OpenSearch-VL-Search-VL-SFT-36K}" # needs verify in actual env! 
 
 link_path() {
   local src="$1"
