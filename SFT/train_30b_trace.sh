@@ -270,11 +270,15 @@ echo "       OPENSEARCH_TRACE_RANKS: ${OPENSEARCH_TRACE_RANKS:-<disabled>}"
 echo "       OPENSEARCH_TRACE_WITH_STACK: ${OPENSEARCH_TRACE_WITH_STACK:-<disabled>}"
 echo "       OPENSEARCH_TRACE_RECORD_SHAPES: ${OPENSEARCH_TRACE_RECORD_SHAPES:-<disabled>}"
 echo "       OPENSEARCH_USE_MUSA_FUSED_ADAMW: ${OPENSEARCH_USE_MUSA_FUSED_ADAMW}"
+echo "       Rendezvous mode: static torchrun (--node_rank ${NODE_RANK})"
 echo "[INFO] Using yaml: ${DEBUG_YAML}"
 echo "[DEBUG] MUSA_LAUNCH_BLOCKING=${MUSA_LAUNCH_BLOCKING:-<unset>}"
 
+# Force the static torchrun branch in llamafactory/launcher.py. This branch
+# passes --node_rank explicitly and avoids elastic rendezvous membership state.
+unset RDZV_ID
+
 FORCE_TORCHRUN=1 \
-RDZV_ID="${RDZV_ID:-opensearch-vl-sft}" \
 NNODES="${NNODES}" \
 NODE_RANK="${NODE_RANK}" \
 MASTER_ADDR="${MASTER_ADDR}" \

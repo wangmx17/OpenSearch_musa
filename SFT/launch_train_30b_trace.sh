@@ -18,6 +18,8 @@ if [[ ! -f "$HOSTFILE" ]]; then
   exit 1
 fi
 
+HOSTFILE="$(cd "$(dirname "$HOSTFILE")" && pwd)/$(basename "$HOSTFILE")"
+
 mapfile -t HOSTS < <(sed 's/#.*//' "$HOSTFILE" | awk 'NF {print $1}')
 
 if [[ "${#HOSTS[@]}" -eq 0 ]]; then
@@ -26,7 +28,13 @@ if [[ "${#HOSTS[@]}" -eq 0 ]]; then
 fi
 
 MASTER_ADDR="${MASTER_ADDR:-${HOSTS[0]}}"
-NNODES="${NNODES:-${#HOSTS[@]}}"
+NNODES="${#HOSTS[@]}"
+
+UNIQUE_HOSTS="$(printf '%s\n' "${HOSTS[@]}" | sort -u | wc -l)"
+if [[ "${UNIQUE_HOSTS}" -ne "${NNODES}" ]]; then
+  echo "duplicate hosts found in: ${HOSTFILE}"
+  exit 1
+fi
 
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
@@ -41,7 +49,7 @@ for rank in "${!HOSTS[@]}"; do
   echo "Launching rank ${rank} on ${host}, log: ${log_file}"
 
   ssh -n -f "$host" \
-      "cd '$WORKDIR' && mkdir -p '$LOG_DIR' && setsid env MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
+      "cd '$WORKDIR' && mkdir -p '$LOG_DIR' && setsid env HOSTFILE='$HOSTFILE' MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
 	# "cd '$WORKDIR' && nohup setsid env MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
 done
 
