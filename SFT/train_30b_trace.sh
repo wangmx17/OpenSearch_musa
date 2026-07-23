@@ -217,6 +217,10 @@ export MCCL_IB_TC="${MCCL_IB_TC:-41}"
 export MCCL_IB_TIMEOUT="${MCCL_IB_TIMEOUT:-22}"
 export MCCL_DEBUG="${MCCL_DEBUG:-WARN}"
 export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
+
+# Keep Qwen3-VL-MoE routing deterministic on torch-musa 2.7.x.
+export OPENSEARCH_MUSA_STABLE_MOE_TOPK="${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}"
+
 # ===================== Misc env =====================
 export NVTE_FP8=0
 export NVTE_DISABLE_FP8=1

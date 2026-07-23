@@ -29,7 +29,7 @@ from .model_utils.checkpointing import prepare_model_for_training
 from .model_utils.embedding import resize_embedding_layer
 from .model_utils.kv_cache import configure_kv_cache
 from .model_utils.longlora import configure_longlora
-from .model_utils.moe import add_z3_leaf_module, configure_moe
+from .model_utils.moe import add_z3_leaf_module, configure_moe, patch_qwen3_vl_moe_stable_router
 from .model_utils.quantization import configure_quantization
 from .model_utils.rope import configure_rope
 from .model_utils.valuehead import prepare_valuehead_model
@@ -201,6 +201,12 @@ def patch_model(
     is_trainable: bool,
     add_valuehead: bool,
 ) -> None:
+    patched_routers = patch_qwen3_vl_moe_stable_router(model)
+    if patched_routers:
+        logger.warning_rank0(
+            f"Patched {patched_routers} Qwen3-VL-MoE routers to use stable top-k on torch-musa 2.7.x."
+        )
+
     gen_config = model.generation_config  # check and fix generation config
     if not gen_config.do_sample and (
         (gen_config.temperature is not None and gen_config.temperature != 1.0)
