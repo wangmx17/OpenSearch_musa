@@ -4,6 +4,7 @@ image_max_pixels: 262144
 video_max_pixels: 16384
 trust_remote_code: true
 experts_implementation: eager # eager, grouped_mm; suggest eager mode for torch 2.7.1 on musa platform
+v1_kernel_ids: te_grouped_gemm
 
 ### method
 stage: sft
