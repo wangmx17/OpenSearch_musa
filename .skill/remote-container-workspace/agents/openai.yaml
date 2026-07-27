@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote Container Workspace"
+  short_description: "Connect to SSH hosts and enter container workspaces"
+  default_prompt: "Use $remote-container-workspace to connect to a remote host and work inside a container directory."

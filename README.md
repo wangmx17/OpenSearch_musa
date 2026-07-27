@@ -1,25 +1,5 @@
 <div align="center">
 
-  <img src="./images/logo.png" alt="OpenSearch-VL" width="35%">
-  <h1 style="margin: -18px 0 0; font-size: 1.8em;">
-    An Open Recipe for Frontier Multimodal Search Agents
-  </h1>
-
-  <p><b>Cold-Start Agentic SFT &nbsp;·&nbsp; Multi-Turn Fatal-Aware GRPO &nbsp;·&nbsp; Visual Tool Use</b></p>
-  
-  [![Paper](https://img.shields.io/badge/paper-A42C25?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/pdf/2605.05185)
-  [![alphaXiv](https://img.shields.io/badge/discussion-A42C25?style=for-the-badge&logo=arxiv&logoColor=white&color=blue)](https://www.alphaxiv.org/abs/2605.05185)
-  [![Github](https://img.shields.io/badge/OpenSearch_VL-000000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/shawn0728/OpenSearch-VL)
-  [![Hugging Face Collection](https://img.shields.io/badge/OpenSearch_VL_Collection-fcd022?style=for-the-badge&logo=huggingface&logoColor=000)](https://huggingface.co/OpenSearch-VL)
-  [![Twitter](https://img.shields.io/badge/Twitter-%23000000.svg?style=for-the-badge&logo=twitter&logoColor=white)](https://x.com/i/status/2052822171932897362)
-
-  [![Awesome](https://awesome.re/badge.svg)](https://github.com/shawn0728/OpenSearch-VL)
-  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-  [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-  ![](https://img.shields.io/github/last-commit/shawn0728/OpenSearch-VL?color=green)
-
-</div>
-
 ## 📑 Table of Contents
 
 - [📖 Introduction](#-introduction)
@@ -31,7 +11,7 @@
 - [🛠️ Prerequisites](#%EF%B8%8F-prerequisites)
 - [🏋️ Agentic SFT · `code/SFT`](#%EF%B8%8F-agentic-sft--codesft)
 - [🚀 Agentic RL · `code/RL`](#-agentic-rl--coderl)
-- [📊 Inference & Evaluation · `opensearch_vl`](#-inference--evaluation--opensearch_vl)
+- [📊 Inference &amp; Evaluation · `opensearch_vl`](#-inference--evaluation--opensearch_vl)
 - [🚧 TODO](#-todo)
 - [🙌 Acknowledgements](#-acknowledgements)
 - [📮 Contact](#-contact)
@@ -40,9 +20,13 @@
 ---
 
 ## MUSA develop
-基于MUSA软件栈的适配版本，当前分支默认基于musa tollkits 5.2.0及torch_musa 2.9.1测试通过
+
+基于MUSA软件栈的适配版本，当前分支默认基于driver 3.3.7 + musa tollkits 4.3.5 + torch_musa 2.7.1测试通过；若使用AI agents可以尝试先导入`.skill`目录下的内容
+
 * DeepSpeed：https://github.com/gliangMT/DeepSpeed
-* docker image: sh-harbor.mthreads.com/mcctest/musa-train:v2.9.1.post1-deb_2026-07-10
+* docker image:
+  * 公网：registry.mthreads.com/public/ai_devtech/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.0
+  * 机房：dockerhub.kubekey.local/his-test/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.0
 
 ```bash
 # install dependencies
@@ -61,9 +45,7 @@ bash train_30b_trace.sh hostfile
 
 # stop training
 bash stop_all.sh hostfile
-
 ```
-
 
 ## 📖 Introduction
 
@@ -85,13 +67,13 @@ Across seven knowledge-intensive multimodal benchmarks—SimpleVQA, VDR, MMSearc
 
 This repository provides everything needed to **reproduce, fine-tune, and evaluate** OpenSearch-VL:
 
-| Component | Path | Description |
-|-----------|------|-------------|
-| **SFT Training** | [`SFT/`](SFT/) | Agentic cold-start with LLaMA-Factory + Ray + ZeRO-3 (full-parameter fine-tune of LLM + ViT + projector) |
-| **RL Training** | [`RL/`](RL/) | Asynchronous agentic RLOO/GRPO on top of SFT, built on rLLM + verl + Megatron-LM + sglang |
-| **Inference & Evaluation** | [`opensearch_vl/`](opensearch_vl/) | Unified `run_infer.py --model {8b,30b-a3b,32b,claude}` rollout + GPT-4o judge for BrowseComp-VL, HLE, VDR-Bench |
-| **Models** | [OpenSearch-VL](https://huggingface.co/OpenSearch-VL) | OpenSearch-VL-{8B, 30B-A3B, 32B} checkpoints |
-| **Datasets** | [OpenSearch-VL](https://huggingface.co/OpenSearch-VL) | SearchVL-SFT-36k (cold-start) and SearchVL-RL-8k (RL) |
+| Component                        | Path                                                 | Description                                                                                                      |
+| -------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **SFT Training**           | [`SFT/`](SFT/)                                      | Agentic cold-start with LLaMA-Factory + Ray + ZeRO-3 (full-parameter fine-tune of LLM + ViT + projector)         |
+| **RL Training**            | [`RL/`](RL/)                                        | Asynchronous agentic RLOO/GRPO on top of SFT, built on rLLM + verl + Megatron-LM + sglang                        |
+| **Inference & Evaluation** | [`opensearch_vl/`](opensearch_vl/)                  | Unified`run_infer.py --model {8b,30b-a3b,32b,claude}` rollout + GPT-4o judge for BrowseComp-VL, HLE, VDR-Bench |
+| **Models**                 | [OpenSearch-VL](https://huggingface.co/OpenSearch-VL) | OpenSearch-VL-{8B, 30B-A3B, 32B} checkpoints                                                                     |
+| **Datasets**               | [OpenSearch-VL](https://huggingface.co/OpenSearch-VL) | SearchVL-SFT-36k (cold-start) and SearchVL-RL-8k (RL)                                                            |
 
 ### Workflow at a Glance
 
@@ -111,19 +93,19 @@ This repository provides everything needed to **reproduce, fine-tune, and evalua
 
 OpenSearch-VL is equipped with a heterogeneous tool set $\mathcal{T} = \mathcal{T}_v \cup \mathcal{T}_r$ shared by SFT, RL, and inference:
 
-| Category | Tools | Purpose |
-|---|---|---|
-| **Retrieval** ($\mathcal{T}_r$) | `text_search`, `image_search`, `web_search`, `visit` | Acquire external textual / visual evidence and visit pages |
-| **Image Enhancement** ($\mathcal{T}_v$) | `sharpen`, `super_resolution`, `perspective_correct` | Repair blurry, low-resolution, or skewed inputs before retrieval |
-| **Attention & Parsing** ($\mathcal{T}_v$) | `crop`, `layout_parsing` (OCR) | Localize regions of interest and decode fine-grained content |
-| **Computation** | `python_interpreter` | Numerical / programmatic computation on retrieved evidence |
+| Category                                          | Tools                                                        | Purpose                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| **Retrieval** ($\mathcal{T}_r$)           | `text_search`, `image_search`, `web_search`, `visit` | Acquire external textual / visual evidence and visit pages       |
+| **Image Enhancement** ($\mathcal{T}_v$)   | `sharpen`, `super_resolution`, `perspective_correct`   | Repair blurry, low-resolution, or skewed inputs before retrieval |
+| **Attention & Parsing** ($\mathcal{T}_v$) | `crop`, `layout_parsing` (OCR)                           | Localize regions of interest and decode fine-grained content     |
+| **Computation**                             | `python_interpreter`                                       | Numerical / programmatic computation on retrieved evidence       |
 
 ### Quick Links
 
 - **Get started** → [Prerequisites](#-prerequisites)
 - **Train your own SFT model** → [Agentic SFT](#%EF%B8%8F-agentic-sft--codesft)
 - **Run agentic RL** → [Agentic RL](#-agentic-rl--coderl)
-- **Inference & benchmark** → [Inference & Evaluation](#-inference--evaluation--opensearch_vl)
+- **Inference & benchmark** → [Inference &amp; Evaluation](#-inference--evaluation--opensearch_vl)
 
 ---
 
@@ -139,14 +121,11 @@ Starting from the SFT-initialized checkpoint, we sample a group of multi-turn tr
 
 ![rl_pipeline](./images/rl_pipeline.png)
 
-
-
 ---
 
 ## 📊 Main Results
 
 OpenSearch-VL is built on three Qwen3-VL variants and evaluated on **7 multimodal knowledge-intensive QA / web-search benchmarks** under the same Pass@1 + GPT-4o judge protocol as VDR-Bench.
-
 
 **Highlights.**
 *OpenSearch-VL-8B* is the strongest open 8B agent (**+3.9** Avg over SenseNova-MARS-8B). *OpenSearch-VL-30B-A3B* improves the Qwen3-VL agentic baseline by **+13.8** Avg, with large gains on **VDR (+13.3)**, **MMSearch (+24.5)**, **FVQA (+10.2)**, and **InfoSeek (+16.2)**. *OpenSearch-VL-32B* surpasses Gemini-2.5-Pro and Claude-4-Sonnet direct-reasoning baselines on most benchmarks.
@@ -171,6 +150,7 @@ The example below illustrates a representative OpenSearch-VL trajectory on a kno
 </div>
 
 **Tool-use flow.**
+
 1. **Visual inspection** — The agent identifies the roadside sign as the most useful visual clue.
 2. **Crop** — It zooms into the sign to obtain a cleaner local view.
 3. **Image search** — The cropped region helps identify the structure as the **Kessock Bridge**.
@@ -214,13 +194,13 @@ code/
 
 ## 🛠️ Prerequisites
 
-| Component   | Minimum                                                       |
-| ----------- | ------------------------------------------------------------- |
-| Python      | 3.10+                                                         |
-| CUDA        | 12.1+ (12.4 recommended)                                      |
-| PyTorch     | ≥ 2.4 with CUDA support                                       |
-| GPU         | ≥ 1× H100 / H800 / A100-80GB for 8B (multi-node for 30B / 32B) |
-| NCCL / RDMA | InfiniBand / RoCE recommended for multi-node; see `RL/rllm/.env.example` |
+| Component   | Minimum                                                                   |
+| ----------- | ------------------------------------------------------------------------- |
+| Python      | 3.10+                                                                     |
+| CUDA        | 12.1+ (12.4 recommended)                                                  |
+| PyTorch     | ≥ 2.4 with CUDA support                                                  |
+| GPU         | ≥ 1× H100 / H800 / A100-80GB for 8B (multi-node for 30B / 32B)          |
+| NCCL / RDMA | InfiniBand / RoCE recommended for multi-node; see`RL/rllm/.env.example` |
 
 The three components share most of their Python dependencies (PyTorch, `transformers`, `transformer_engine`, `flash-attn`, `deepspeed`, `ray`, `qwen-vl-utils`, `sglang`) — we recommend installing each sub-project into its **own virtual environment**.
 
@@ -228,19 +208,19 @@ The three components share most of their Python dependencies (PyTorch, `transfor
 
 All keys are optional; components gracefully no-op if unset.
 
-| Variable | Used by | Purpose |
-| --- | --- | --- |
-| `API_GATEWAY_HOST` / `API_GATEWAY_USER` / `API_GATEWAY_KEY` | RL | Optional HMAC-secured gateway that proxies Serper + Jina behind one credential (set on RL workers). |
-| `API_HOST` / `API_USER` / `API_KEY` | opensearch_vl | Same gateway, named to match the inference package's env vars. |
-| `SERPER_API_KEY` | RL, opensearch_vl | [Serper.dev](https://serper.dev) text & image search (used when no gateway is configured). |
-| `JINA_API_KEY` | RL, opensearch_vl | [Jina AI](https://jina.ai) reader (page visit / content extraction). |
-| `QWEN_API_BASE` / `QWEN_MODEL_NAME` | opensearch_vl | OpenAI-compatible chat-completions server used for search summarization (defaults to a local Qwen3-32B). |
-| `LAYOUT_PARSING_API_URL` / `LAYOUT_PARSING_TOKEN` | RL, opensearch_vl | PP-StructureV3-compatible OCR / layout endpoint. |
-| `CLAUDE_API_HOST` / `CLAUDE_API_USER` / `CLAUDE_API_KEY` | opensearch_vl | Optional HMAC-secured gateway for the Claude Opus 4.5 backend. |
-| `JUDGE_API_BASE_URL` / `JUDGE_APP_ID` / `JUDGE_APP_KEY` / `JUDGE_MODEL_MARKER` | opensearch_vl | OpenAI-compatible GPT-4o judge used by `eval_with_gpt4o.py`. |
-| `QWEN3VL_8B_PATH` / `QWEN3VL_32B_PATH` / `QWEN3VL_30B_A3B_PATH` | opensearch_vl | Local checkpoints for the three Qwen3-VL variants (overrideable via `--checkpoint`). |
-| `FVQA_IMAGE_DIR` | opensearch_vl | Optional fallback directory of `<case_id>.<ext>` images used when a benchmark URL is unreachable. |
-| `WANDB_API_KEY` | SFT, RL | W&B logging. |
+| Variable                                                                               | Used by           | Purpose                                                                                                  |
+| -------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `API_GATEWAY_HOST` / `API_GATEWAY_USER` / `API_GATEWAY_KEY`                      | RL                | Optional HMAC-secured gateway that proxies Serper + Jina behind one credential (set on RL workers).      |
+| `API_HOST` / `API_USER` / `API_KEY`                                              | opensearch_vl     | Same gateway, named to match the inference package's env vars.                                           |
+| `SERPER_API_KEY`                                                                     | RL, opensearch_vl | [Serper.dev](https://serper.dev) text & image search (used when no gateway is configured).                |
+| `JINA_API_KEY`                                                                       | RL, opensearch_vl | [Jina AI](https://jina.ai) reader (page visit / content extraction).                                      |
+| `QWEN_API_BASE` / `QWEN_MODEL_NAME`                                                | opensearch_vl     | OpenAI-compatible chat-completions server used for search summarization (defaults to a local Qwen3-32B). |
+| `LAYOUT_PARSING_API_URL` / `LAYOUT_PARSING_TOKEN`                                  | RL, opensearch_vl | PP-StructureV3-compatible OCR / layout endpoint.                                                         |
+| `CLAUDE_API_HOST` / `CLAUDE_API_USER` / `CLAUDE_API_KEY`                         | opensearch_vl     | Optional HMAC-secured gateway for the Claude Opus 4.5 backend.                                           |
+| `JUDGE_API_BASE_URL` / `JUDGE_APP_ID` / `JUDGE_APP_KEY` / `JUDGE_MODEL_MARKER` | opensearch_vl     | OpenAI-compatible GPT-4o judge used by`eval_with_gpt4o.py`.                                            |
+| `QWEN3VL_8B_PATH` / `QWEN3VL_32B_PATH` / `QWEN3VL_30B_A3B_PATH`                  | opensearch_vl     | Local checkpoints for the three Qwen3-VL variants (overrideable via`--checkpoint`).                    |
+| `FVQA_IMAGE_DIR`                                                                     | opensearch_vl     | Optional fallback directory of`<case_id>.<ext>` images used when a benchmark URL is unreachable.       |
+| `WANDB_API_KEY`                                                                      | SFT, RL           | W&B logging.                                                                                             |
 
 Two templates are provided: [`RL/rllm/.env.example`](RL/rllm/.env.example) for the RL workers, and [`opensearch_vl/.env.example`](opensearch_vl/.env.example) for inference + judge. Copy whichever applies and source it before launching.
 
@@ -294,28 +274,28 @@ FORCE_TORCHRUN=1 NNODES=1 NPROC_PER_NODE=8 llamafactory-cli train \
 
 Edit `ray_num_workers`, `placement_strategy`, and NCCL / IB vars to match your cluster.
 
-| YAML | Model | # workers |
-| ---- | ----- | --------- |
-| `qwen3_vl_full_sft_8b_ray.yaml`      | Qwen3-VL-8B-Instruct      | 256 |
-| `qwen3_vl_full_sft_30_3b_ray.yaml`   | Qwen3-VL-30B-A3B-Instruct | 256 |
-| `qwen3_vl_full_sft_32b_ray.yaml`     | Qwen3-VL-32B-Instruct     | 256 |
-| `qwen3_5vl_full_sft_27b_ray.yaml`    | Qwen3.5-VL-27B-Instruct   | 256 |
-| `qwen3_5vl_full_sft_35b_3b_ray.yaml` | Qwen3.5-VL-35B-A3B        | 256 |
-| `qwen2_5_vl_full_sft_7b_ray.yaml`    | Qwen2.5-VL-7B-Instruct    | 256 |
-| `qwen2_5_vl_full_sft_32b_ray.yaml`   | Qwen2.5-VL-32B-Instruct   | 256 |
-| `qwen2_5_vl_full_sft_72b_ray.yaml`   | Qwen2.5-VL-72B-Instruct   | 256 |
+| YAML                                   | Model                     | # workers |
+| -------------------------------------- | ------------------------- | --------- |
+| `qwen3_vl_full_sft_8b_ray.yaml`      | Qwen3-VL-8B-Instruct      | 256       |
+| `qwen3_vl_full_sft_30_3b_ray.yaml`   | Qwen3-VL-30B-A3B-Instruct | 256       |
+| `qwen3_vl_full_sft_32b_ray.yaml`     | Qwen3-VL-32B-Instruct     | 256       |
+| `qwen3_5vl_full_sft_27b_ray.yaml`    | Qwen3.5-VL-27B-Instruct   | 256       |
+| `qwen3_5vl_full_sft_35b_3b_ray.yaml` | Qwen3.5-VL-35B-A3B        | 256       |
+| `qwen2_5_vl_full_sft_7b_ray.yaml`    | Qwen2.5-VL-7B-Instruct    | 256       |
+| `qwen2_5_vl_full_sft_32b_ray.yaml`   | Qwen2.5-VL-32B-Instruct   | 256       |
+| `qwen2_5_vl_full_sft_72b_ray.yaml`   | Qwen2.5-VL-72B-Instruct   | 256       |
 
 ### Shared hyper-parameters
 
-| Hyperparameter | Value |
-| --- | --- |
-| Cutoff length | `32000` |
-| Precision | `bf16` |
-| Learning rate | `2e-5` (cosine, `warmup_ratio=0.1`) |
-| Epochs | `8` |
-| Per-device batch | `1` (with `gradient_checkpointing: true`) |
-| DeepSpeed | ZeRO-3 (`examples/deepspeed/ds_z3_config.json`) |
-| Frozen modules | none (`freeze_vision_tower: false`, `freeze_multi_modal_projector: false`) |
+| Hyperparameter   | Value                                                                          |
+| ---------------- | ------------------------------------------------------------------------------ |
+| Cutoff length    | `32000`                                                                      |
+| Precision        | `bf16`                                                                       |
+| Learning rate    | `2e-5` (cosine, `warmup_ratio=0.1`)                                        |
+| Epochs           | `8`                                                                          |
+| Per-device batch | `1` (with `gradient_checkpointing: true`)                                  |
+| DeepSpeed        | ZeRO-3 (`examples/deepspeed/ds_z3_config.json`)                              |
+| Frozen modules   | none (`freeze_vision_tower: false`, `freeze_multi_modal_projector: false`) |
 
 Checkpoints land in `saves/<model>/full/sft_data_v1/` (override via `output_dir` / `ray_storage_path` in the YAML).
 
@@ -376,27 +356,27 @@ bash RL/rllm/vision_deepresearch_async_workflow/run/qwen3-vl-32b-multi-node.sh  
 
 ### Key hyper-parameters (8B multi-node)
 
-| Field | Value |
-| --- | --- |
-| Advantage estimator | `rloo` (set `grpo` / `reinforce_plus_plus` to swap) |
-| KL coefficient | `0.001` |
-| Clip ratio (high) | `0.28` |
-| Train prompt batch | `256` (group size `n_resp_per_prompt=8`, mini-batch `64`) |
-| Max prompt / response length | `4096` / `70000` |
-| Megatron parallelism | `TP=4 / PP=2 / CP=8` (dense) |
-| sglang rollout | `TP=4`, `gpu_memory_utilization=0.85` |
-| Reward composition | $r = r_{\text{fmt}} \cdot [\,0.8\, r_{\text{acc}} + 0.2\, r_{\text{query}}\,]$ |
-| Fatal threshold $K$ | `3` consecutive tool-execution errors |
+| Field                        | Value                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| Advantage estimator          | `rloo` (set `grpo` / `reinforce_plus_plus` to swap)                        |
+| KL coefficient               | `0.001`                                                                        |
+| Clip ratio (high)            | `0.28`                                                                         |
+| Train prompt batch           | `256` (group size `n_resp_per_prompt=8`, mini-batch `64`)                  |
+| Max prompt / response length | `4096` / `70000`                                                             |
+| Megatron parallelism         | `TP=4 / PP=2 / CP=8` (dense)                                                   |
+| sglang rollout               | `TP=4`, `gpu_memory_utilization=0.85`                                        |
+| Reward composition           | $r = r_{\text{fmt}} \cdot [\,0.8\, r_{\text{acc}} + 0.2\, r_{\text{query}}\,]$ |
+| Fatal threshold$K$         | `3` consecutive tool-execution errors                                          |
 
 Checkpoints go to `checkpoints/${project_name}/${exp_name}/`; trajectories can be dumped to `$TRAJ_DUMP_DIR` (default `./trajectory_dumps/<exp>/`).
 
 ### Reproducing the paper
 
-| Variant | Script | Cluster |
-| --- | --- | --- |
-| OpenSearch-VL-8B          | `qwen3-vl-8b-multi-node.sh`       | 8 × 8 H100 / H800 |
-| OpenSearch-VL-30B-A3B     | `qwen3-vl-30b-3b-multi-node.sh`   | 8 × 8 H100 / H800 |
-| OpenSearch-VL-32B         | `qwen3-vl-32b-multi-node.sh`      | 16 × 8 H100 / H800 |
+| Variant               | Script                            | Cluster             |
+| --------------------- | --------------------------------- | ------------------- |
+| OpenSearch-VL-8B      | `qwen3-vl-8b-multi-node.sh`     | 8 × 8 H100 / H800  |
+| OpenSearch-VL-30B-A3B | `qwen3-vl-30b-3b-multi-node.sh` | 8 × 8 H100 / H800  |
+| OpenSearch-VL-32B     | `qwen3-vl-32b-multi-node.sh`    | 16 × 8 H100 / H800 |
 
 > Full details, environment variables, and cluster notes: [`code/RL/README.md`](RL/README.md).
 
@@ -433,12 +413,12 @@ opensearch_vl/
 
 One entrypoint, four backends. Each call accepts a parquet of questions + images and writes one trajectory JSON per sample:
 
-| `--model`   | Backend                                              |
-| ----------- | ---------------------------------------------------- |
-| `8b`        | OpenSearch-VL-8B (Qwen3-VL-8B base, dense)           |
-| `32b`       | OpenSearch-VL-32B (Qwen3-VL-32B base, dense)         |
-| `30b-a3b`   | OpenSearch-VL-30B-A3B (Qwen3-VL-30B-A3B base, MoE)   |
-| `claude`    | Claude Opus 4.5 via HMAC gateway (no GPU required)   |
+| `--model` | Backend                                            |
+| ----------- | -------------------------------------------------- |
+| `8b`      | OpenSearch-VL-8B (Qwen3-VL-8B base, dense)         |
+| `32b`     | OpenSearch-VL-32B (Qwen3-VL-32B base, dense)       |
+| `30b-a3b` | OpenSearch-VL-30B-A3B (Qwen3-VL-30B-A3B base, MoE) |
+| `claude`  | Claude Opus 4.5 via HMAC gateway (no GPU required) |
 
 Multi-GPU model parallelism is enabled automatically when `--gpus 0,1,...` lists more than one device (`device_map="auto"`); single-GPU placement uses `device_map={"": "cuda:N"}`. The MoE scatter dtype patch for 30B-A3B is applied automatically.
 
@@ -492,8 +472,8 @@ bash opensearch_vl/run_eval.sh --workers 20
 
 ## 🚧 TODO
 
-- [x] Release **OpenSearch-VL-{8B, 30B-A3B, 32B}** checkpoints on the [HuggingFace collection](https://huggingface.co/OpenSearch-VL).
-- [x] Release **SearchVL-SFT-36k** and **SearchVL-RL-8k** datasets (full bundle + image assets).
+- [X] Release **OpenSearch-VL-{8B, 30B-A3B, 32B}** checkpoints on the [HuggingFace collection](https://huggingface.co/OpenSearch-VL).
+- [X] Release **SearchVL-SFT-36k** and **SearchVL-RL-8k** datasets (full bundle + image assets).
 - [ ] Release the **data curation pipeline** (Wikipedia path sampling, fuzzy entity rewriting, source-anchor visual grounding) as a standalone toolkit.
 - [ ] Public **demo** for interactive multi-turn deep-research rollouts.
 
@@ -520,10 +500,10 @@ Project-specific additions are released under the root [`LICENSE`](LICENSE) (Apa
 
 For questions, feedback, or collaboration opportunities, feel free to reach out: csfufu0728@gmail.com
 
-
 ## 📄 Citation
 
 If you find our works useful for your research, please consider citing:
+
 ```
 @article{chen2026opensearch,
   title={OpenSearch-VL: An Open Recipe for Frontier Multimodal Search Agents},
