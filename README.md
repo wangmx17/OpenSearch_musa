@@ -17,6 +17,8 @@
 - [📮 Contact](#-contact)
 - [📄 Citation](#-citation)
 
+</div>
+
 ---
 
 ## MUSA develop
