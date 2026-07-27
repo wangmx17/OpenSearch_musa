@@ -1,5 +1,25 @@
 <div align="center">
 
+  <img src="./images/logo.png" alt="OpenSearch-VL" width="35%">
+  <h1 style="margin: -18px 0 0; font-size: 1.8em;">
+    An Open Recipe for Frontier Multimodal Search Agents
+  </h1>
+
+  <p><b>Cold-Start Agentic SFT &nbsp;·&nbsp; Multi-Turn Fatal-Aware GRPO &nbsp;·&nbsp; Visual Tool Use</b></p>
+
+  [![Paper](https://img.shields.io/badge/paper-A42C25?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/pdf/2605.05185)
+  [![alphaXiv](https://img.shields.io/badge/discussion-A42C25?style=for-the-badge&logo=arxiv&logoColor=white&color=blue)](https://www.alphaxiv.org/abs/2605.05185)
+  [![Github](https://img.shields.io/badge/OpenSearch_VL-000000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/shawn0728/OpenSearch-VL)
+  [![Hugging Face Collection](https://img.shields.io/badge/OpenSearch_VL_Collection-fcd022?style=for-the-badge&logo=huggingface&logoColor=000)](https://huggingface.co/OpenSearch-VL)
+  [![Twitter](https://img.shields.io/badge/Twitter-%23000000.svg?style=for-the-badge&logo=twitter&logoColor=white)](https://x.com/i/status/2052822171932897362)
+
+  [![Awesome](https://awesome.re/badge.svg)](https://github.com/shawn0728/OpenSearch-VL)
+  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+  [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+  ![](https://img.shields.io/github/last-commit/shawn0728/OpenSearch-VL?color=green)
+
+</div>
+
 ## 📑 Table of Contents
 
 - [📖 Introduction](#-introduction)
@@ -16,8 +36,6 @@
 - [🙌 Acknowledgements](#-acknowledgements)
 - [📮 Contact](#-contact)
 - [📄 Citation](#-citation)
-
-</div>
 
 ---
 
