@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+from types import MethodType
 from typing import TYPE_CHECKING, Union
 
 import torch
@@ -31,6 +33,45 @@ if TYPE_CHECKING:
 
 if is_transformers_version_greater_than("4.57.0"):
     from transformers.models.qwen3_omni_moe import modeling_qwen3_omni_moe
+
+
+def stable_topk(input: torch.Tensor, k: int, dim: int = -1) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Return the largest values with stable tie-breaking by the original index."""
+    values, indices = torch.sort(input, dim=dim, descending=True, stable=True)
+    normalized_dim = dim if dim >= 0 else input.ndim + dim
+    return values.narrow(normalized_dim, 0, k), indices.narrow(normalized_dim, 0, k)
+
+
+def _qwen3_vl_moe_stable_router_forward(self, hidden_states: torch.Tensor):
+    hidden_states = hidden_states.reshape(-1, self.hidden_dim)
+    router_logits = F.linear(hidden_states, self.weight)
+    router_logits = F.softmax(router_logits, dtype=torch.float, dim=-1)
+    router_top_value, router_indices = stable_topk(router_logits, self.top_k, dim=-1)
+    router_top_value /= router_top_value.sum(dim=-1, keepdim=True)
+    return router_logits, router_top_value.to(router_logits.dtype), router_indices
+
+
+def patch_qwen3_vl_moe_stable_router(model: "PreTrainedModel") -> int:
+    r"""Work around unstable MUSA top-k tie-breaking in torch-musa 2.7.x."""
+    if os.getenv("OPENSEARCH_MUSA_STABLE_MOE_TOPK", "1").lower() in {"0", "false", "no", "off"}:
+        return 0
+
+    if getattr(model.config, "model_type", None) != "qwen3_vl_moe":
+        return 0
+
+    torch_version = torch.__version__.split("+", maxsplit=1)[0]
+    if not torch_version.startswith("2.7.") or not hasattr(torch, "musa") or not torch.musa.is_available():
+        return 0
+
+    from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import Qwen3VLMoeTextTopKRouter
+
+    patched_routers = 0
+    for module in model.modules():
+        if isinstance(module, Qwen3VLMoeTextTopKRouter):
+            module.forward = MethodType(_qwen3_vl_moe_stable_router_forward, module)
+            patched_routers += 1
+
+    return patched_routers
 
 
 def _set_z3_leaf_modules(model: "PreTrainedModel", leaf_modules: list[Union["nn.Module", str]]) -> None:

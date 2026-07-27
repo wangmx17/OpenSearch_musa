@@ -17,19 +17,71 @@
 # limitations under the License.
 
 import math
+import os
+from types import MethodType
 from typing import TYPE_CHECKING
+
+import torch
 
 from ...extras import logging
 from ...extras.constants import RopeScaling
 
 
 if TYPE_CHECKING:
-    from transformers import PretrainedConfig
+    from transformers import PretrainedConfig, PreTrainedModel
 
     from ...hparams import ModelArguments
 
 
 logger = logging.get_logger(__name__)
+
+
+def _qwen3_vl_moe_rope_forward_without_bmm(self, x: torch.Tensor, position_ids: torch.Tensor):
+    if position_ids.ndim == 2:
+        position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+    inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
+    position_ids_expanded = position_ids[:, :, None, :].float()
+
+    device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
+    from transformers.models.qwen3_vl_moe import modeling_qwen3_vl_moe
+
+    with modeling_qwen3_vl_moe.maybe_autocast(device_type=device_type, enabled=False):
+        # The contraction dimension is one, so broadcast multiplication is
+        # mathematically identical to matmul and avoids the torch-musa 2.7.1
+        # float32 bmm kernel that loses position precision after index 2048.
+        freqs = (inv_freq_expanded.float() * position_ids_expanded.float()).transpose(2, 3)
+        freqs = self.apply_interleaved_mrope(freqs, self.mrope_section)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos() * self.attention_scaling
+        sin = emb.sin() * self.attention_scaling
+
+    return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+
+
+def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> int:
+    if os.getenv("OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND", "1").lower() in {"0", "false", "no", "off"}:
+        return 0
+    if getattr(model.config, "model_type", None) != "qwen3_vl_moe":
+        return 0
+
+    torch_version = torch.__version__.split("+", maxsplit=1)[0]
+    if not torch_version.startswith("2.7.") or not hasattr(torch, "musa") or not torch.musa.is_available():
+        return 0
+
+    from transformers.models.qwen3_vl_moe import modeling_qwen3_vl_moe
+
+    Qwen3VLMoeTextRotaryEmbedding = modeling_qwen3_vl_moe.Qwen3VLMoeTextRotaryEmbedding
+
+    patched_modules = 0
+    for module in model.modules():
+        if isinstance(module, Qwen3VLMoeTextRotaryEmbedding):
+            forward = torch.no_grad()(
+                modeling_qwen3_vl_moe.dynamic_rope_update(_qwen3_vl_moe_rope_forward_without_bmm)
+            )
+            module.forward = MethodType(forward, module)
+            patched_modules += 1
+
+    return patched_modules
 
 
 def configure_rope(config: "PretrainedConfig", model_args: "ModelArguments") -> None:
