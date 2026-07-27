@@ -24,8 +24,6 @@ from ...extras.misc import calculate_tps
 from ...extras.packages import is_transformers_version_greater_than
 from ...extras.ploting import plot_loss
 from ...model import load_model, load_tokenizer
-from ..attention_trace import install_attention_precision_trace
-from ..module_trace import install_module_precision_trace
 from ..trainer_utils import create_modelcard_and_push, create_ref_model
 from .metric import ComputeAccuracy, ComputeSimilarity, eval_logit_processor
 from .trainer import CustomSeq2SeqTrainer
@@ -53,11 +51,6 @@ def run_sft(
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
     dataset_module = get_dataset(template, model_args, data_args, training_args, stage="sft", **tokenizer_module)
     model = load_model(tokenizer, model_args, finetuning_args, training_args.do_train)
-    if install_attention_precision_trace():
-        logger.warning_rank0("Installed Qwen3-VL attention boundary trace.")
-    traced_modules = install_module_precision_trace(model)
-    if traced_modules:
-        logger.warning_rank0(f"Installed precision hooks on {traced_modules} model modules.")
 
     ref_model = None
     if finetuning_args.use_asft_loss:

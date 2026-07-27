@@ -36,35 +36,11 @@ if [[ "${UNIQUE_HOSTS}" -ne "${NNODES}" ]]; then
   exit 1
 fi
 
-# Allocate the experiment directory once on the launcher and propagate the
-# same EXP_ID to every node. Letting each node read CURRENT_EXP_ID races on
-# the shared filesystem and can split one distributed job across exp_N dirs.
-EXP_ROOT="${WORKDIR}/logs"
-mkdir -p "${EXP_ROOT}"
-if [[ -z "${EXP_ID:-}" ]]; then
-  EXP_ALLOC_LOCK="${EXP_ROOT}/.exp_launcher_alloc.lock"
-  until mkdir "${EXP_ALLOC_LOCK}" 2>/dev/null; do
-    sleep 0.2
-  done
-  trap 'rmdir "${EXP_ALLOC_LOCK}" 2>/dev/null || true' EXIT
-
-  LAST_EXP_ID="$(find "${EXP_ROOT}" -maxdepth 1 -type d -name 'exp_[0-9]*' -printf '%f\n' 2>/dev/null \
-    | sed -n 's/^exp_\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)"
-  LAST_EXP_ID="${LAST_EXP_ID:-0}"
-  EXP_ID="$((LAST_EXP_ID + 1))"
-  mkdir -p "${EXP_ROOT}/exp_${EXP_ID}"
-  printf '%s\n' "${EXP_ID}" > "${EXP_ROOT}/exp_${EXP_ID}/EXP_ID"
-
-  rmdir "${EXP_ALLOC_LOCK}"
-  trap - EXIT
-fi
-
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
 echo "NNODES=${NNODES}"
 echo "WORKDIR=${WORKDIR}"
 echo "LOG_DIR=${LOG_DIR}"
-echo "EXP_ID=${EXP_ID}"
 
 for rank in "${!HOSTS[@]}"; do
   host="${HOSTS[$rank]}"
@@ -73,7 +49,7 @@ for rank in "${!HOSTS[@]}"; do
   echo "Launching rank ${rank} on ${host}, log: ${log_file}"
 
   ssh -n -f "$host" \
-      "cd '$WORKDIR' && mkdir -p '$LOG_DIR' && setsid env HOSTFILE='$HOSTFILE' MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' EXP_ID='$EXP_ID' OPENSEARCH_MUSA_STABLE_MOE_TOPK='${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}' OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND='${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-1}' OPENSEARCH_DIAGNOSTIC_DATASET='${OPENSEARCH_DIAGNOSTIC_DATASET:-}' OPENSEARCH_DIAGNOSTIC_DISABLE_SHUFFLING='${OPENSEARCH_DIAGNOSTIC_DISABLE_SHUFFLING:-0}' OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION='${OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION:-}' OPENSEARCH_DIAGNOSTIC_MAX_STEPS='${OPENSEARCH_DIAGNOSTIC_MAX_STEPS:-}' OPENSEARCH_MODULE_TRACE='${OPENSEARCH_MODULE_TRACE:-0}' OPENSEARCH_MODULE_TRACE_TARGETS='${OPENSEARCH_MODULE_TRACE_TARGETS:-}' OPENSEARCH_MODULE_TRACE_FULL_HASH_NUMEL='${OPENSEARCH_MODULE_TRACE_FULL_HASH_NUMEL:-131072}' OPENSEARCH_ATTENTION_TRACE='${OPENSEARCH_ATTENTION_TRACE:-0}' OPENSEARCH_ATTENTION_TRACE_MIN_SEQ_LEN='${OPENSEARCH_ATTENTION_TRACE_MIN_SEQ_LEN:-1024}' OPENSEARCH_PRECISION_DEBUG='${OPENSEARCH_PRECISION_DEBUG:-0}' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
+      "cd '$WORKDIR' && mkdir -p '$LOG_DIR' && setsid env HOSTFILE='$HOSTFILE' MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
 	# "cd '$WORKDIR' && nohup setsid env MASTER_ADDR='$MASTER_ADDR' MASTER_PORT='$MASTER_PORT' NNODES='$NNODES' NODE_RANK='$rank' SKIP_INSTALL='$SKIP_INSTALL' bash '$TRAIN_SCRIPT' > '$log_file' 2>&1 < /dev/null &"
 done
 

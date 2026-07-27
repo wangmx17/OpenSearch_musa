@@ -45,7 +45,6 @@ class DeviceType(StrEnum):
     CUDA = "cuda"
     META = "meta"
     MPS = "mps"
-    MUSA = "musa"
     NPU = "npu"
     XPU = "xpu"
 
