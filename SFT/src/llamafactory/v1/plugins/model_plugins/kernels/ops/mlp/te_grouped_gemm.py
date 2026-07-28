@@ -15,8 +15,6 @@
 """Transformer Engine grouped GEMM support for Qwen3-VL-MoE training on MUSA."""
 
 import importlib.util
-import sys
-import time
 import types
 
 import torch
@@ -35,37 +33,16 @@ def _is_te_grouped_gemm_available() -> bool:
     return importlib.util.find_spec("transformer_engine") is not None
 
 
-def _clear_partial_transformer_engine_import() -> None:
-    for module_name in list(sys.modules):
-        if module_name == "transformer_engine" or module_name.startswith("transformer_engine."):
-            sys.modules.pop(module_name, None)
-
-
 def _te_grouped_gemm_api():
     # The installed MUSA TE build patches CUDA-named compatibility APIs while
     # importing. Finish torch_musa initialization first so that patching does
     # not race lazy additions to sys.modules.
     import torch_musa  # noqa: F401
 
-    last_error = None
-    for _ in range(3):
-        try:
-            from transformer_engine.pytorch.cpp_extensions import general_grouped_gemm
-            from transformer_engine.pytorch.module.base import get_multi_stream_cublas_workspace
-            torch.cuda.current_device()
+    from transformer_engine.pytorch.cpp_extensions import general_grouped_gemm
+    from transformer_engine.pytorch.module.base import get_multi_stream_cublas_workspace
 
-            return general_grouped_gemm, get_multi_stream_cublas_workspace
-        except (AttributeError, RuntimeError) as exc:
-            if not (
-                "dictionary changed size during iteration" in str(exc)
-                or "_cuda_getDevice" in str(exc)
-            ):
-                raise
-            last_error = exc
-            _clear_partial_transformer_engine_import()
-            time.sleep(0.2)
-
-    raise last_error
+    return general_grouped_gemm, get_multi_stream_cublas_workspace
 
 
 def _validate_grouped_linear_inputs(

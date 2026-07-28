@@ -55,7 +55,7 @@ Qwen3-VL-MoE expert MLPs can be switched between the existing
 The MATE path has been validated in the JD MUSA test environment with
 `mate 0.2.1+mu437` and `torch_musa 2.7.1+1569808`. See
 [`docs/TE_MATE_compatibility_notes.md`](docs/TE_MATE_compatibility_notes.md)
-for the TE import compatibility notes observed during the TE/MATE comparison.
+for the TE/MATE validation notes and the historical TE import investigation.
 
 ## 1. Install
 
