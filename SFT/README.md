@@ -46,6 +46,17 @@ Shared hyper-parameters (8B example):
 - ZeRO-3: `deepspeed: examples/deepspeed/ds_z3_config.json`
 - Full fine-tune of LLM + vision tower + projector (`freeze_vision_tower: false`, `freeze_multi_modal_projector: false`)
 
+### TE / MATE grouped GEMM
+
+Qwen3-VL-MoE expert MLPs can be switched between the existing
+`te_grouped_gemm` path and the experimental `mate_grouped_gemm` path through
+`v1_kernel_ids` in the training YAML.
+
+The MATE path has been validated in the JD MUSA test environment with
+`mate 0.2.1+mu437` and `torch_musa 2.7.1+1569808`. See
+[`docs/TE_MATE_compatibility_notes.md`](docs/TE_MATE_compatibility_notes.md)
+for the TE/MATE validation notes and the historical TE import investigation.
+
 ## 1. Install
 
 Python ≥ 3.10, CUDA ≥ 12.1, PyTorch ≥ 2.4.
