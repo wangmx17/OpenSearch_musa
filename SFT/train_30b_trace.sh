@@ -220,7 +220,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
 
 # Keep Qwen3-VL-MoE routing deterministic on torch-musa 2.7.x.
 export OPENSEARCH_MUSA_STABLE_MOE_TOPK="${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}"
-export OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND="${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-1}"
+export OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND="${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-0}"
 
 # Cross-version first-forward diagnostics. Only global rank 0 writes sampled
 # module inputs/outputs; the existing precision callback records per-rank loss.
@@ -268,7 +268,7 @@ export OPENSEARCH_TRACE_PROFILE_MEMORY="${OPENSEARCH_TRACE_PROFILE_MEMORY:-0}"
 export OPENSEARCH_TRACE_WITH_FLOPS="${OPENSEARCH_TRACE_WITH_FLOPS:-0}"
 
 export ALLOW_TORCH29_CONV3D=1
-export OPENSEARCH_MUSA_ALLOW_TF32="${OPENSEARCH_MUSA_ALLOW_TF32:-1}"
+export OPENSEARCH_MUSA_ALLOW_TF32="${OPENSEARCH_MUSA_ALLOW_TF32:-0}"
 export OPENSEARCH_USE_MUSA_FUSED_ADAMW="${OPENSEARCH_USE_MUSA_FUSED_ADAMW:-1}"
 # ===================== Launch =====================
 YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/examples/agentic_full/qwen3_vl_full_sft_30_3b_trace.yaml}"
