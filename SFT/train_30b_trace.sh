@@ -276,31 +276,6 @@ DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${NODE_RANK}.
 cp "${YAML_CONFIG}" "${DEBUG_YAML}"
 sed -i 's#^deepspeed: .*#deepspeed: examples/deepspeed/ds_z3_config_change.json#' "${DEBUG_YAML}"
 
-set_debug_yaml_scalar() {
-  local key="$1"
-  local value="$2"
-  if grep -q "^${key}:" "${DEBUG_YAML}"; then
-    sed -i "s#^${key}:.*#${key}: ${value}#" "${DEBUG_YAML}"
-  else
-    printf '\n%s: %s\n' "${key}" "${value}" >> "${DEBUG_YAML}"
-  fi
-}
-
-# Optional one-step, fixed-order diagnostic mode. These overrides are applied
-# only to the per-experiment YAML copy and never rewrite the source config.
-if [[ -n "${OPENSEARCH_DIAGNOSTIC_DATASET:-}" ]]; then
-  set_debug_yaml_scalar dataset "${OPENSEARCH_DIAGNOSTIC_DATASET}"
-fi
-if [[ "${OPENSEARCH_DIAGNOSTIC_DISABLE_SHUFFLING:-0}" == "1" ]]; then
-  set_debug_yaml_scalar disable_shuffling true
-fi
-if [[ -n "${OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION:-}" ]]; then
-  set_debug_yaml_scalar experts_implementation "${OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION}"
-fi
-if [[ -n "${OPENSEARCH_DIAGNOSTIC_MAX_STEPS:-}" ]]; then
-  set_debug_yaml_scalar max_steps "${OPENSEARCH_DIAGNOSTIC_MAX_STEPS}"
-fi
-
 echo "[INFO] Launching multi-node training"
 echo "       Master node: ${MASTER_ADDR}:${MASTER_PORT}"
 echo "       Nodes total: ${NNODES}"
@@ -316,10 +291,6 @@ echo "       OPENSEARCH_TRACE_RANKS: ${OPENSEARCH_TRACE_RANKS:-<disabled>}"
 echo "       OPENSEARCH_TRACE_WITH_STACK: ${OPENSEARCH_TRACE_WITH_STACK:-<disabled>}"
 echo "       OPENSEARCH_TRACE_RECORD_SHAPES: ${OPENSEARCH_TRACE_RECORD_SHAPES:-<disabled>}"
 echo "       OPENSEARCH_USE_MUSA_FUSED_ADAMW: ${OPENSEARCH_USE_MUSA_FUSED_ADAMW}"
-echo "       OPENSEARCH_DIAGNOSTIC_DATASET: ${OPENSEARCH_DIAGNOSTIC_DATASET:-<disabled>}"
-echo "       OPENSEARCH_DIAGNOSTIC_DISABLE_SHUFFLING: ${OPENSEARCH_DIAGNOSTIC_DISABLE_SHUFFLING:-0}"
-echo "       OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION: ${OPENSEARCH_DIAGNOSTIC_EXPERTS_IMPLEMENTATION:-<source yaml>}"
-echo "       OPENSEARCH_DIAGNOSTIC_MAX_STEPS: ${OPENSEARCH_DIAGNOSTIC_MAX_STEPS:-<source yaml>}"
 echo "       Rendezvous mode: static torchrun (--node_rank ${NODE_RANK})"
 echo "[INFO] Using yaml: ${DEBUG_YAML}"
 echo "[DEBUG] MUSA_LAUNCH_BLOCKING=${MUSA_LAUNCH_BLOCKING:-<unset>}"
