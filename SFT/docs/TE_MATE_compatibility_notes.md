@@ -1,86 +1,200 @@
-# TE / MATE 兼容性说明
+# MATE grouped GEMM 接入说明
 
-本文记录的是当前 `Qwen3-VL-30B-A3B` 的 grouped GEMM 切换过程中，
-TE 与 MATE 在摩尔线程 MUSA 环境里遇到的兼容性问题、修改原因和排查方向。
+本文只说明本分支新增的 MATE grouped GEMM 接入原理、配置方式、验证结果和
+安装包获取方式。TE grouped GEMM 是原有能力，TE 的接入与使用说明请参考项目
+已有 TE 文档，本文不重复展开。
 
-## 背景
+## 1. 接入目标
 
-当前训练代码同时支持两条 MoE grouped GEMM 路径：
+Qwen3-VL-MoE 的 expert MLP 会根据 router 的结果，把 token 分配到不同 expert。
+每个 expert 都要执行一次矩阵乘法，因此一次 MoE 层实际上包含多个不同 token
+数量的 GEMM。MATE 的 grouped GEMM 接口可以把这些按 expert 分组的矩阵乘法
+交给 MUSA kernel 执行，减少 Python 层逐 expert 调度的开销。
 
-- `te_grouped_gemm`
-- `mate_grouped_gemm`
+本分支新增独立的 `mate_grouped_gemm` kernel，不替换或修改原有
+`te_grouped_gemm` 实现。两条路径通过同一个 YAML 参数选择，便于在相同数据、
+模型和训练超参数下进行性能与数值对比。
 
-目标是通过同一套 SFT 配置，对比 TE 和 MATE 的性能与精度。
+## 2. MATE 接入原理
 
-当前环境中安装并验证过的 MATE 版本是 `mate 0.2.1+mu437`。
+代码位于：
 
-## 历史现象与本次复现
+```text
+src/llamafactory/v1/plugins/model_plugins/kernels/ops/mlp/mate_grouped_gemm.py
+```
 
-此前的排查记录中，直接加载 TE 路径时曾报告过导入阶段不稳定，典型表现包括：
+一次 expert 前向的主要步骤如下：
 
-- `dictionary changed size during iteration`
-- `_cuda_getDevice`
+1. 从 `top_k_index` 取得每个 token 被路由到的 expert ID，从 `top_k_weights`
+   取得对应的 router 权重。
+2. 按 expert ID 对 token 排序，把属于同一个 expert 的 token 放在连续区域，
+   同时统计 `tokens_per_expert`。
+3. 将排序后的 token、expert 权重和每个 expert 的 token 数量传给
+   `mate.gemm.ragged_m_moe_gemm_16bit`，执行 gate/up projection 和 down
+   projection 的 grouped GEMM。
+4. 将 token 恢复到原始顺序，乘以 router 权重，并合并每个 token 的 top-k
+   expert 输出。
 
-这些错误被认为发生在 `transformer_engine` 导入 / patch 早期，而不是训练主循环里。
+`ragged_m_moe_gemm_16bit` 的核心输入可以概括为：
 
-本次在 `his-test/jd-qwen-vl-30b-a3b-test3` 的 `10.121.32.2` 和
-`10.121.32.3` 上，使用未包含 TE 稳定性补丁的基线代码进行了双机 8 卡、
-3-step 的真实 TE 训练。训练完成且未出现上述两类错误；因此当前证据不足以
-证明必须修改 TE 才能保证该环境正常启动。
+```text
+连续排列的 token + [num_experts, N, K] 的 expert 权重
+                  + 每个 expert 的 token 数量
+                  -> 连续排列的 grouped GEMM 输出
+```
 
-## 原因判断
+### 反向计算说明
 
-结合日志和代码路径，问题更像是 **TE 在 MUSA 环境下初始化时与 `torch_musa` 的兼容/补丁顺序冲突**，而不是 MoE 计算公式本身错误。
+当前接入使用自定义 `torch.autograd.Function` 保持训练图完整：
 
-简单理解就是：
+- forward 使用 MATE 的 `ragged_m_moe_gemm_16bit`；
+- `grad_input` 复用 MATE grouped GEMM，使用转置后的 expert 权重计算输入梯度；
+- `grad_weight` 当前按 expert 切分后调用矩阵乘法计算，并不是声明 MATE 提供了
+  一个完整的自动求导 wrapper。
 
-1. TE 在导入时会做一些兼容性 patch
-2. 当前 MUSA 环境也会对相关设备接口做初始化和注册
-3. 两边如果顺序不合适，就可能在导入阶段触发异常
+因此，当前版本是“MATE 加速 forward 和 input-gradient，weight-gradient
+保留明确的逐 expert 计算”的接入方案。评估训练性能时应使用完整的
+forward + backward + optimizer step，而不能只测 forward。
 
-因此，这类问题通常不是“模型代码写错了”，而是“运行时初始化顺序不稳”。
+### 小规模输入回退
 
-## TE 修改的处理结论
+代码会在以下情况回退到 eager grouped 计算：
 
-此前对 TE 的修改，目的不是改算法，而是：
+- 当前设备不是 MUSA；
+- 输入为空或所有 expert 都没有 token；
+- token 数、输入 K 维度或输出 N 维度低于当前实现的阈值。
 
-- 让原本的 TE baseline 在当前环境里更稳定地启动
-- 避免导入阶段的偶发失败影响 TE vs MATE 对比
+默认阈值可以通过以下环境变量调整：
 
-这些改动在本分支最终不保留，TE 继续使用基线实现。若后续在同一环境
-再次稳定复现上述错误，应先保留完整错误日志和复现条件，再单独提交
-TE 稳定性修复，而不要和 MATE kernel 开关混在一起。
+```bash
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_TOKENS=128
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_K=128
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_N=64
+```
 
-历史补丁的改动重点曾包括：
+这些阈值只影响 MATE kernel 是否启用，不改变 YAML 中的 kernel 选择语义。
 
-- 先完成 `torch_musa` 初始化
-- 再导入 `transformer_engine`
-- 如果出现 partial import，则清理残留模块后重试
+## 3. YAML 配置切换
 
-## MATE 是怎么接入的
+原有 TE 路径：
 
-MATE 侧新增的是独立 kernel：
+```yaml
+v1_kernel_ids: te_grouped_gemm
+```
 
-- `mate_grouped_gemm`
+MATE 路径：
 
-它通过 `v1_kernel_ids` 切换，不影响原有训练主流程。
+```yaml
+v1_kernel_ids: mate_grouped_gemm
+```
 
-当前对比方式是：
+切换只修改训练 YAML 的 `v1_kernel_ids`，不需要修改 Python 代码或启动脚本。
+MATE kernel 会在模型加载阶段注册，并只对 `Qwen3VLMoeTextExperts` 模块应用
+替代 forward。
 
-- `v1_kernel_ids: te_grouped_gemm`
-- `v1_kernel_ids: mate_grouped_gemm`
+如果环境缺少 MATE 或 `torch_musa`，选择 `mate_grouped_gemm` 时应直接报出依赖
+错误，而不是静默地把 MATE 配置当成 TE 使用。
 
-## 如何快速定位这个问题
+## 4. 已验证版本
 
-如果别人遇到类似错误，可以优先检查：
+本分支在 JD MUSA 测试环境中验证的 MATE 包为：
 
-1. `transformer_engine` 是否能在当前 MUSA 环境正常导入
-2. `torch_musa` 是否已经先完成初始化
-3. 日志里是否出现在训练前的 import / patch 阶段报错
-4. 当前选择的是 `te_grouped_gemm` 还是 `mate_grouped_gemm`
+```text
+mate 0.2.1+mu437
+```
 
-## 结论
+对应发布包为：
 
-本分支的核心改动是新增 `mate_grouped_gemm` 并保留 YAML 切换能力，
-不是修改 TE。当前双机验证表明，基线 TE 和 MATE 都可以通过
-`v1_kernel_ids` 在训练 YAML 中选择并进入正常训练流程。
+```text
+mate_0.2.1.PH1.tar.gz
+```
+
+发布目录使用 MUSA SDK 4.3.7：
+
+```text
+musa/external/4.3.7/deb/others/
+```
+
+MATE 的 JIT 运行还需要同一发布目录中的配套 `tvm.tar.gz`。本次安装包中
+验证到的关键配套包包括：
+
+```text
+apache_tvm_ffi-0.1.9.post3.dev0+musa.1...whl
+torch_c_dlpack_ext-0.1.5-*.whl
+```
+
+具体 wheel 文件名可能随构建日期变化，应以解包后的实际文件名为准。
+
+## 5. 获取与安装
+
+### 方式一：wget
+
+```bash
+mkdir -p /tmp/mate_install
+cd /tmp/mate_install
+wget https://sh-moss.mthreads.com/sw-release/musa/external/4.3.7/deb/others/mate_0.2.1.PH1.tar.gz
+wget https://sh-moss.mthreads.com/sw-release/musa/external/4.3.7/deb/others/tvm.tar.gz
+```
+
+`mate_0.2.1.PH1.tar.gz` 是发布归档，内部包含 wheel，不能直接把 tar.gz
+当作标准 Python 源码包安装：
+
+```bash
+tar -xzf mate_0.2.1.PH1.tar.gz
+python3 -m pip install --no-cache-dir ./mate-0.2.1+mu437-py3-none-any.whl
+```
+
+安装配套 JIT 依赖：
+
+```bash
+mkdir -p /tmp/mate_tvm_install
+tar -xzf tvm.tar.gz -C /tmp/mate_tvm_install
+python3 -m pip install --no-cache-dir \
+  /tmp/mate_tvm_install/torch_c_dlpack_ext-*.whl \
+  /tmp/mate_tvm_install/apache_tvm_ffi-*.whl
+```
+
+### 方式二：mc
+
+如果使用 MOSS 官方 `mc` 入口，先按官方凭据管理方式配置临时 alias；不要把
+access key、secret key 写入代码仓库、脚本或本文档：
+
+```bash
+mc alias set sh-moss https://sh-moss.mthreads.com '<ACCESS_KEY>' '<SECRET_KEY>'
+mc cp sh-moss/sw-release/musa/external/4.3.7/deb/others/mate_0.2.1.PH1.tar.gz ./
+mc cp sh-moss/sw-release/musa/external/4.3.7/deb/others/tvm.tar.gz ./
+```
+
+### 安装后检查
+
+```bash
+python3 - <<'PY'
+import importlib.util
+import mate
+import mate.gemm
+
+print('mate_spec:', importlib.util.find_spec('mate').origin)
+print('mate_version:', getattr(mate, '__version__', '<no __version__>'))
+print('has_ragged_m_moe_gemm:', hasattr(mate.gemm, 'ragged_m_moe_gemm_16bit'))
+PY
+```
+
+预期至少应满足：
+
+```text
+mate_version: 0.2.1+mu437
+has_ragged_m_moe_gemm: True
+```
+
+## 6. 验证建议
+
+安装成功不等于训练路径已经可用，建议按以下顺序验证：
+
+1. 先执行 `import mate`、`import mate.gemm`；
+2. 使用小张量验证 MATE grouped GEMM 输出是 finite，并与 baseline 做误差比较；
+3. 分别使用 `te_grouped_gemm` 和 `mate_grouped_gemm` 的 YAML 跑相同的短训练；
+4. 同时检查 loss、梯度是否 finite、step 时间和完整 forward/backward 时间；
+5. 再进行更长训练和收敛曲线对比。
+
+本分支已在双机 MUSA 测试环境中验证：TE YAML 和 MATE YAML 均能进入正常训练
+流程；MATE 版本记录为 `0.2.1+mu437`。
