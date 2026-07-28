@@ -50,8 +50,7 @@ Shared hyper-parameters (8B example):
 
 Qwen3-VL-MoE expert MLPs can be switched between the existing
 `te_grouped_gemm` path and the experimental `mate_grouped_gemm` path through
-`v1_kernel_ids` in the training YAML or by passing
-`OPENSEARCH_DIAGNOSTIC_V1_KERNEL_IDS` through the launch scripts.
+`v1_kernel_ids` in the training YAML.
 
 The MATE path has been validated in the JD MUSA test environment with
 `mate 0.2.1+mu437` and `torch_musa 2.7.1+1569808`. See
