@@ -1,0 +1,2 @@
+/SFT/launch_train_30b_trace.sh text eol=lf
+/SFT/scripts/run_musa_vmm_mccl_repro.sh text eol=lf
