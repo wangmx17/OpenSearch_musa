@@ -22,6 +22,17 @@ from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 
 import torch
 import torch.distributed as dist
+
+# Controlled by OPENSEARCH_MUSA_ALLOW_TF32 (default 1=allow). Print once for launch logs.
+if hasattr(torch.backends, "mudnn"):
+    _tf32_env = os.getenv("OPENSEARCH_MUSA_ALLOW_TF32", "1").lower()
+    torch.backends.mudnn.allow_tf32 = _tf32_env not in {"0", "false", "no", "off"}
+    print(
+        f"[TF32] OPENSEARCH_MUSA_ALLOW_TF32={_tf32_env} "
+        f"torch.backends.mudnn.allow_tf32={torch.backends.mudnn.allow_tf32}",
+        flush=True,
+    )
+
 import transformers.dynamic_module_utils
 from huggingface_hub.utils import WeakFileLock
 from transformers import InfNanRemoveLogitsProcessor, LogitsProcessorList
