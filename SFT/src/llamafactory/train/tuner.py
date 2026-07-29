@@ -53,6 +53,7 @@ from .trainer_utils import (
     get_swanlab_callback,
     sort_placement_group_by_node_ip,
 )
+from .zero_init_probe import ZeroInitProbeCallback, record_zero_init_event
 
 
 if is_ray_available():
@@ -70,8 +71,11 @@ def _training_function(config: dict[str, Any]) -> None:
     args = config.get("args")
     callbacks: list[Any] = config.get("callbacks")
     model_args, data_args, training_args, finetuning_args, generating_args = get_train_args(args)
+    record_zero_init_event("training_args_ready", output_dir=training_args.output_dir)
 
     callbacks.append(LogCallback())
+    if is_env_enabled("OPENSEARCH_ZERO_INIT_PROBE"):
+        callbacks.append(ZeroInitProbeCallback())
     if is_env_enabled("OPENSEARCH_TRACE"):
         callbacks.append(MusaProfilerCallback())
 
@@ -92,9 +96,7 @@ def _training_function(config: dict[str, Any]) -> None:
 
     if finetuning_args.stage == "sft" and finetuning_args.use_hyper_parallel:
         if not is_hyper_parallel_available():
-            raise ImportError(
-                "hyper_parallel is not installed. Please install it with `pip install hyper_parallel`."
-            )
+            raise ImportError("hyper_parallel is not installed. Please install it with `pip install hyper_parallel`.")
         from .hyper_parallel import run_sft as run_sft_hp
 
         run_sft_hp(model_args, data_args, training_args, finetuning_args, generating_args, callbacks)

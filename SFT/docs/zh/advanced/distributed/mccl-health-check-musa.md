@@ -92,10 +92,12 @@ MPI timeout 90 秒
 默认硬检查：
 
 - `mpirun/all_reduce_perf` 必须正常退出；
-- 必须产生有效性能数据行；
+- 必须产生有效性能数据行；如果 `MCCL INFO` 将数据行打断，则必须能解析最终的 `Avg bus bandwidth` 汇总；
 - 每一行的 `#wrong` 必须为 0；
 - 汇总必须包含 `# Out of bounds values : 0 OK`；
 - MPI/MCCL 初始化或 collective 超过总超时会失败。
+
+多张 local device 共用 stdout 时，INFO 日志可能插入性能数据行中。此时最终平均带宽作为 liveness 和带宽 fallback，但不会绕过返回码、超时、`Out of bounds values`、`#wrong` 或显式带宽阈值检查。ZeRO Init 的真实训练重复复现方法见 [MUSA 四机 ZeRO Init 卡死重复复现与取证](zero-init-hang-reproduction.md)。
 
 1 MiB、2 次迭代的结果容易受冷启动影响，所以默认只报告带宽，不把带宽作为硬门槛。如果积累了稳定基线，可以显式设置：
 

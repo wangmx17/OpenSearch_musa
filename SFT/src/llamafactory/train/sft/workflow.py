@@ -27,6 +27,7 @@ from ...model import load_model, load_tokenizer
 from ..attention_trace import install_attention_precision_trace
 from ..module_trace import install_module_precision_trace
 from ..trainer_utils import create_modelcard_and_push, create_ref_model
+from ..zero_init_probe import record_zero_init_event, skip_diagnostic_final_save
 from .metric import ComputeAccuracy, ComputeSimilarity, eval_logit_processor
 from .trainer import CustomSeq2SeqTrainer
 
@@ -48,11 +49,17 @@ def run_sft(
     generating_args: "GeneratingArguments",
     callbacks: Optional[list["TrainerCallback"]] = None,
 ):
+    record_zero_init_event("tokenizer_load_begin", output_dir=training_args.output_dir)
     tokenizer_module = load_tokenizer(model_args)
+    record_zero_init_event("tokenizer_load_done", output_dir=training_args.output_dir)
     tokenizer = tokenizer_module["tokenizer"]
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
+    record_zero_init_event("dataset_load_begin", output_dir=training_args.output_dir)
     dataset_module = get_dataset(template, model_args, data_args, training_args, stage="sft", **tokenizer_module)
+    record_zero_init_event("dataset_load_done", output_dir=training_args.output_dir)
+    record_zero_init_event("model_load_begin", output_dir=training_args.output_dir)
     model = load_model(tokenizer, model_args, finetuning_args, training_args.do_train)
+    record_zero_init_event("model_load_done", output_dir=training_args.output_dir)
     if install_attention_precision_trace():
         logger.warning_rank0("Installed Qwen3-VL attention boundary trace.")
     traced_modules = install_module_precision_trace(model)
@@ -80,6 +87,7 @@ def run_sft(
 
     # Metric utils
     metric_module = {}
+    record_zero_init_event("trainer_init_begin", output_dir=training_args.output_dir)
     if model_args.use_kt:
         if training_args.predict_with_generate:
             raise NotImplementedError("`predict_with_generate` is not supported in KTransformers SFT yet.")
@@ -141,11 +149,18 @@ def run_sft(
             **tokenizer_module,
             **metric_module,
         )
+    record_zero_init_event("trainer_init_done", output_dir=training_args.output_dir)
 
     # Training
     if training_args.do_train:
+        record_zero_init_event("trainer_train_begin", output_dir=training_args.output_dir)
         train_result = trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
-        trainer.save_model()
+        record_zero_init_event("trainer_train_done", output_dir=training_args.output_dir)
+        skip_final_save = skip_diagnostic_final_save()
+        if not skip_final_save:
+            trainer.save_model()
+        else:
+            logger.warning_rank0("Skipping final model and trainer-state save in diagnostic mode.")
         if finetuning_args.include_effective_tokens_per_second:
             train_result.metrics["effective_tokens_per_sec"] = calculate_tps(
                 dataset_module["train_dataset"], train_result.metrics, stage="sft"
@@ -153,7 +168,8 @@ def run_sft(
 
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
-        trainer.save_state()
+        if not skip_final_save:
+            trainer.save_state()
         if trainer.is_world_process_zero() and finetuning_args.plot_loss:
             keys = ["loss"]
             if isinstance(dataset_module.get("eval_dataset"), dict):

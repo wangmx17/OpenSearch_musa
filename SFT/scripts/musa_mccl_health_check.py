@@ -92,6 +92,7 @@ class PerfRow:
 class ParsedOutput:
     rows: list[PerfRow]
     out_of_bounds: int | None
+    avg_busbw_gbps: float | None
 
 
 @dataclass(frozen=True)
@@ -141,11 +142,20 @@ def parse_mccl_test_output(output: str) -> ParsedOutput:
     """Extract correctness and bus-bandwidth fields from MCCL tests output."""
     rows: list[PerfRow] = []
     out_of_bounds: int | None = None
+    avg_busbw_gbps: float | None = None
 
     for line in output.splitlines():
         match = re.search(r"Out of bounds values\s*:\s*(\d+)", line, flags=re.IGNORECASE)
         if match:
             out_of_bounds = int(match.group(1))
+
+        match = re.search(
+            r"Avg bus bandwidth\s*:\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[-+]?inf|nan)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            avg_busbw_gbps = float(match.group(1))
 
         fields = line.split()
         if len(fields) < 13 or not fields[0].isdigit():
@@ -163,7 +173,7 @@ def parse_mccl_test_output(output: str) -> ParsedOutput:
             continue
         rows.append(row)
 
-    return ParsedOutput(rows=rows, out_of_bounds=out_of_bounds)
+    return ParsedOutput(rows=rows, out_of_bounds=out_of_bounds, avg_busbw_gbps=avg_busbw_gbps)
 
 
 def validate_mccl_result(
@@ -178,8 +188,8 @@ def validate_mccl_result(
         failures.append("mpirun exceeded the external timeout")
     if returncode != 0:
         failures.append(f"all_reduce_perf exited with code {returncode}")
-    if not parsed.rows:
-        failures.append("no MCCL performance rows were found")
+    if not parsed.rows and parsed.avg_busbw_gbps is None:
+        failures.append("no MCCL performance rows or average bandwidth summary were found")
     if parsed.out_of_bounds is None:
         failures.append("the correctness summary '# Out of bounds values' is missing")
     elif parsed.out_of_bounds != 0:
@@ -189,16 +199,20 @@ def validate_mccl_result(
     if wrong_values:
         failures.append(f"MCCL reported {wrong_values} wrong values")
 
-    bandwidths = [
+    observed_bandwidths = [
         bandwidth
         for row in parsed.rows
         for bandwidth in (row.out_of_place_busbw_gbps, row.in_place_busbw_gbps)
-        if math.isfinite(bandwidth)
     ]
+    if not observed_bandwidths and parsed.avg_busbw_gbps is not None:
+        # MCCL INFO output can be interleaved into a nccl-tests row when many
+        # local devices share stdout. The final average is emitted atomically
+        # and remains a valid liveness/correctness and bandwidth observation.
+        observed_bandwidths.append(parsed.avg_busbw_gbps)
+    bandwidths = [bandwidth for bandwidth in observed_bandwidths if math.isfinite(bandwidth)]
     invalid_bandwidths = [
         bandwidth
-        for row in parsed.rows
-        for bandwidth in (row.out_of_place_busbw_gbps, row.in_place_busbw_gbps)
+        for bandwidth in observed_bandwidths
         if not math.isfinite(bandwidth) or bandwidth <= 0
     ]
     if invalid_bandwidths:
@@ -482,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
             for bandwidth in (row.out_of_place_busbw_gbps, row.in_place_busbw_gbps)
             if math.isfinite(bandwidth)
         ]
+        if not bandwidths and parsed.avg_busbw_gbps is not None and math.isfinite(parsed.avg_busbw_gbps):
+            bandwidths.append(parsed.avg_busbw_gbps)
         summary = {
             "status": "fail" if failures else "pass",
             "hosts": [asdict(entry) for entry in hosts],
@@ -490,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
             "returncode": result.returncode,
             "timed_out": result.timed_out,
             "out_of_bounds": parsed.out_of_bounds,
+            "avg_busbw_gbps": parsed.avg_busbw_gbps,
             "rows": [asdict(row) for row in parsed.rows],
             "min_busbw_gbps": min(bandwidths) if bandwidths else None,
             "max_busbw_gbps": max(bandwidths) if bandwidths else None,

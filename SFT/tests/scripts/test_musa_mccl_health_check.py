@@ -65,6 +65,34 @@ def test_parse_and_validate_successful_mccl_output() -> None:
     assert failures == []
 
 
+def test_parse_and_validate_mccl_output_with_interleaved_info_lines() -> None:
+    output = """
+    #       size         count      type   redop    root     time   algbw   busbw #wrong
+         1048576        262144     float     sum      -1worker32010:36275 [7] MCCL INFO mcclEnqueueCheck
+       1127.5    0.93    1.80      0worker32010:36275 [7] MCCL INFO mcclEnqueueCheck
+       1132.4    0.93    1.79      0
+    # Out of bounds values : 0 OK
+    # Avg bus bandwidth    : 1.79796
+    """
+
+    parsed = health_check.parse_mccl_test_output(output)
+    failures = health_check.validate_mccl_result(parsed, returncode=0, timed_out=False, min_busbw_gbps=0)
+
+    assert parsed.rows == []
+    assert parsed.out_of_bounds == 0
+    assert parsed.avg_busbw_gbps == pytest.approx(1.79796)
+    assert failures == []
+
+
+def test_average_bandwidth_fallback_honors_threshold() -> None:
+    output = "# Out of bounds values : 0 OK\n# Avg bus bandwidth : 1.79796"
+
+    parsed = health_check.parse_mccl_test_output(output)
+    failures = health_check.validate_mccl_result(parsed, returncode=0, timed_out=False, min_busbw_gbps=2.0)
+
+    assert "below 2.000 GB/s" in "\n".join(failures)
+
+
 @pytest.mark.parametrize(
     ("output", "returncode", "timed_out", "expected"),
     [
@@ -75,7 +103,7 @@ def test_parse_and_validate_successful_mccl_output() -> None:
             "wrong values",
         ),
         ("", 124, True, "external timeout"),
-        ("# Out of bounds values : 0 OK", 0, False, "no MCCL performance rows"),
+        ("# Out of bounds values : 0 OK", 0, False, "no MCCL performance rows or average bandwidth summary"),
         (
             "1048576 262144 float sum -1 120 8.7 nan 0 119 8.8 inf 0\n# Out of bounds values : 0 OK",
             0,
