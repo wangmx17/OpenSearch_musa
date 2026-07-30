@@ -30,6 +30,7 @@ from .model_utils.embedding import resize_embedding_layer
 from .model_utils.kv_cache import configure_kv_cache
 from .model_utils.longlora import configure_longlora
 from .model_utils.moe import add_z3_leaf_module, configure_moe, patch_qwen3_vl_moe_stable_router
+from .model_utils.musa_fused_rmsnorm import patch_qwen3_vl_moe_fused_rmsnorm
 from .model_utils.quantization import configure_quantization
 from .model_utils.rope import configure_rope, patch_qwen3_vl_moe_rope_bmm
 from .model_utils.valuehead import prepare_valuehead_model
@@ -201,6 +202,11 @@ def patch_model(
     is_trainable: bool,
     add_valuehead: bool,
 ) -> None:
+    patched_rmsnorm_modules = patch_qwen3_vl_moe_fused_rmsnorm(model)
+    if patched_rmsnorm_modules:
+        logger.warning_rank0(
+            f"Patched {patched_rmsnorm_modules} Qwen3-VL-MoE text RMSNorm modules to use MUSA fused RMSNorm."
+        )
     patched_routers = patch_qwen3_vl_moe_stable_router(model)
     if patched_routers:
         logger.warning_rank0(
