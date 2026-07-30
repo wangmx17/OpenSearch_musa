@@ -25,6 +25,7 @@ import torch
 
 from ...extras import logging
 from ...extras.constants import RopeScaling
+from .musa_fused_rope import MUSA_ROPE_FREQ_CIS_ATTR, apply_rotary_pos_emb_musa
 
 
 if TYPE_CHECKING:
@@ -36,7 +37,11 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)
 
 
-def _qwen3_vl_moe_rope_forward_without_bmm(self, x: torch.Tensor, position_ids: torch.Tensor):
+def _env_flag(name: str, default: str) -> bool:
+    return os.getenv(name, default).lower() not in {"0", "false", "no", "off"}
+
+
+def _qwen3_vl_moe_rope_forward(self, x: torch.Tensor, position_ids: torch.Tensor):
     if position_ids.ndim == 2:
         position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
     inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
@@ -46,27 +51,48 @@ def _qwen3_vl_moe_rope_forward_without_bmm(self, x: torch.Tensor, position_ids: 
     from transformers.models.qwen3_vl_moe import modeling_qwen3_vl_moe
 
     with modeling_qwen3_vl_moe.maybe_autocast(device_type=device_type, enabled=False):
-        # The contraction dimension is one, so broadcast multiplication is
-        # mathematically identical to matmul and avoids the torch-musa 2.7.1
-        # float32 bmm kernel that loses position precision after index 2048.
-        freqs = (inv_freq_expanded.float() * position_ids_expanded.float()).transpose(2, 3)
+        if _env_flag("OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND", "1"):
+            # The contraction dimension is one, so broadcast multiplication is
+            # mathematically identical to matmul and avoids the torch-musa 2.7.1
+            # float32 bmm kernel that loses position precision after index 2048.
+            freqs = (inv_freq_expanded.float() * position_ids_expanded.float()).transpose(2, 3)
+        else:
+            # Keep the original Transformers BMM frequency-generation path. This
+            # allows BMM + fused RoPE A/B runs while preserving its exact output
+            # phase for torch.rope instead of reconstructing it from BF16 cos/sin.
+            freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(2, 3)
         freqs = self.apply_interleaved_mrope(freqs, self.mrope_section)
         emb = torch.cat((freqs, freqs), dim=-1)
         cos = emb.cos() * self.attention_scaling
         sin = emb.sin() * self.attention_scaling
 
-    return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+    cos = cos.to(dtype=x.dtype)
+    sin = sin.to(dtype=x.dtype)
+    if (
+        _env_flag("OPENSEARCH_MUSA_FUSED_ROPE", "0")
+        and x.device.type == "musa"
+        and emb.shape[0] == 1
+        and isinstance(self.attention_scaling, (int, float))
+        and float(self.attention_scaling) == 1.0
+    ):
+        # Keep the exact FP32 phase produced before cos/sin quantization. Reconstructing
+        # it later with atan2(cos_bf16, sin_bf16) is slower and measurably less accurate.
+        setattr(cos, MUSA_ROPE_FREQ_CIS_ATTR, emb.squeeze(0).contiguous())
+
+    return cos, sin
 
 
-def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> int:
-    if os.getenv("OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND", "1").lower() in {"0", "false", "no", "off"}:
-        return 0
+def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> tuple[int, bool, bool]:
+    use_bmm_workaround = _env_flag("OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND", "1")
+    use_fused_rope = _env_flag("OPENSEARCH_MUSA_FUSED_ROPE", "0")
+    if not use_bmm_workaround and not use_fused_rope:
+        return 0, False, False
     if getattr(model.config, "model_type", None) != "qwen3_vl_moe":
-        return 0
+        return 0, False, False
 
     torch_version = torch.__version__.split("+", maxsplit=1)[0]
     if not torch_version.startswith("2.7.") or not hasattr(torch, "musa") or not torch.musa.is_available():
-        return 0
+        return 0, False, False
 
     from transformers.models.qwen3_vl_moe import modeling_qwen3_vl_moe
 
@@ -75,13 +101,16 @@ def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> int:
     patched_modules = 0
     for module in model.modules():
         if isinstance(module, Qwen3VLMoeTextRotaryEmbedding):
-            forward = torch.no_grad()(
-                modeling_qwen3_vl_moe.dynamic_rope_update(_qwen3_vl_moe_rope_forward_without_bmm)
-            )
+            forward = torch.no_grad()(modeling_qwen3_vl_moe.dynamic_rope_update(_qwen3_vl_moe_rope_forward))
             module.forward = MethodType(forward, module)
             patched_modules += 1
 
-    return patched_modules
+    fused_rope_patched = use_fused_rope and patched_modules > 0 and hasattr(torch, "rope")
+    if fused_rope_patched:
+        modeling_qwen3_vl_moe.apply_rotary_pos_emb = apply_rotary_pos_emb_musa
+
+    broadcast_mul_patched = use_bmm_workaround and patched_modules > 0
+    return patched_modules, broadcast_mul_patched, fused_rope_patched
 
 
 def configure_rope(config: "PretrainedConfig", model_args: "ModelArguments") -> None:

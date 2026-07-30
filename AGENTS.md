@@ -46,7 +46,6 @@
 - Pod 选择：使用稳定标签 `app=jd-starvla-test` 动态查询当前 Running Pod。
 - 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
 
-
 ### `jd-qwen3-vl-30b-a3b`
 
 - 访问方式：`bastion-k8s`
@@ -56,16 +55,43 @@
 - Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b` 动态查询当前 Running Pod。
 - 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
 
-
 ### `jd-qwen-vl-30b-a3b-test2`
 
 - 访问方式：`bastion-k8s`
 - Kubernetes namespace：`his-test`
-- Workload：`deployment/jd-qwen3-v-30b-a3b`
-- 项目工作目录：`/home/jd/gl_dev/OpenSearch_vl_musa/SFT`
-- Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b` 动态查询当前 Running Pod。
+- Workload：`deployment/jd-qwen3-v-30b-a3b-test2`
+- 项目工作目录：`/home/jd/gl_dev_test1/OpenSearch_vl_musa/SFT`
+- Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b-test2` 动态查询当前 Running Pod。
 - 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
 
+### `jd-qwen-vl-30b-a3b-test3`
+
+- 访问方式：`bastion-k8s`
+- Kubernetes namespace：`his-test`
+- Workload：`deployment/jd-qwen3-v-30b-a3b-test3`
+- 项目工作目录：`/home/jd/gl_dev_test1/OpenSearch_vl_musa/SFT`
+- Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b-test3` 动态查询当前 Running Pod。
+- 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
+
+
+### `jd-qwen-vl-30b-a3b-test4`
+
+- 访问方式：`bastion-k8s`
+- Kubernetes namespace：`his-test`
+- Workload：`deployment/jd-qwen3-v-30b-a3b-test4`
+- 项目工作目录：`/home/jd/gl_dev_test1/OpenSearch_vl_musa/SFT`
+- Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b-test4` 动态查询当前 Running Pod。
+- 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
+
+
+### `jd-qwen-vl-30b-a3b-test5`
+
+- 访问方式：`bastion-k8s`
+- Kubernetes namespace：`his-test`
+- Workload：`deployment/jd-qwen3-v-30b-a3b-test5`
+- 项目工作目录：`/home/jd/gl_dev_test1/OpenSearch_vl_musa/SFT`
+- Pod 选择：使用稳定标签 `app=jd-qwen3-vl-30b-a3b-test5` 动态查询当前 Running Pod。
+- 禁止缓存或复用历史 Pod 名、Pod IP、节点名和副本状态；每次任务均须重新查询。
 
 ### `jd-qwen-remote`
 
@@ -78,7 +104,6 @@
 - 进入指定容器前，必须使用该 skill 的最小只读验证确认容器和工作目录均存在。
 - 同一任务访问两个容器时，按用户指定范围依次验证和执行，不得把一个容器的环境、进程或依赖状态当作另一个容器的事实。
 - 认证优先使用 SSH key/agent；本清单不得添加 SSH 密码。
-
 
 ### `jd-qwen-remote-sdk5.1.0`
 

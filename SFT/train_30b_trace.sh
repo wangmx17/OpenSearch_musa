@@ -220,7 +220,10 @@ export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
 
 # Keep Qwen3-VL-MoE routing deterministic on torch-musa 2.7.x.
 export OPENSEARCH_MUSA_STABLE_MOE_TOPK="${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}"
+# Default to the precision-safe frequency backend. Set to 0 for BMM + fused RoPE A/B runs.
 export OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND="${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-0}"
+# Use the repository-owned runtime patch; set to 0 for an eager-RoPE A/B rollback.
+export OPENSEARCH_MUSA_FUSED_ROPE="${OPENSEARCH_MUSA_FUSED_ROPE:-1}"
 
 # Cross-version first-forward diagnostics. Only global rank 0 writes sampled
 # module inputs/outputs; the existing precision callback records per-rank loss.

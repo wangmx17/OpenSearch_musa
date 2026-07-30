@@ -206,10 +206,15 @@ def patch_model(
         logger.warning_rank0(
             f"Patched {patched_routers} Qwen3-VL-MoE routers to use stable top-k on torch-musa 2.7.x."
         )
-    patched_rope_modules = patch_qwen3_vl_moe_rope_bmm(model)
-    if patched_rope_modules:
+    _, broadcast_mul_patched, fused_rope_patched = patch_qwen3_vl_moe_rope_bmm(model)
+    if broadcast_mul_patched:
         logger.warning_rank0(
             "Patched Qwen3-VL-MoE text RoPE to replace the inaccurate torch-musa 2.7.x bmm with broadcast mul."
+        )
+    if fused_rope_patched:
+        frequency_backend = "broadcast-mul" if broadcast_mul_patched else "BMM"
+        logger.warning_rank0(
+            f"Patched Qwen3-VL-MoE text attention to use MUSA fused RoPE with FP32 phases from {frequency_backend}."
         )
 
     gen_config = model.generation_config  # check and fix generation config
