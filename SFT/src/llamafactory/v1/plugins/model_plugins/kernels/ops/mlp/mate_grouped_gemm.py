@@ -1,4 +1,15 @@
-"""MATE grouped GEMM support for Qwen3-VL-MoE training on MUSA."""
+"""MATE grouped GEMM support for Qwen3-VL-MoE training on MUSA.
+
+Mirrors the TE grouped-GEMM path:
+  - forward:  ragged_m_moe_gemm_16bit
+  - dX:       ragged_m_moe_gemm_16bit with transposed weights
+  - dW:       ragged_k_moe_gemm_16bit (K-grouped / weight-grad)
+
+Unlike the previous MATE integration, weight gradients also go through MATE
+grouped GEMM instead of per-expert eager matmul.
+"""
+
+from __future__ import annotations
 
 import importlib.util
 import os
@@ -21,11 +32,18 @@ def _is_mate_grouped_gemm_available() -> bool:
     return importlib.util.find_spec("mate") is not None and importlib.util.find_spec("torch_musa") is not None
 
 
-def _mate_grouped_gemm_api():
+def _mate_ragged_m_api():
     import torch_musa  # noqa: F401, I001
     import mate.gemm
 
     return mate.gemm.ragged_m_moe_gemm_16bit
+
+
+def _mate_ragged_k_api():
+    import torch_musa  # noqa: F401
+    import mate.gemm
+
+    return mate.gemm.ragged_k_moe_gemm_16bit
 
 
 def _expert_token_counts(expert_ids: torch.Tensor, num_experts: int) -> torch.Tensor:
@@ -52,7 +70,9 @@ def _validate_grouped_linear_inputs(input: torch.Tensor, weight: torch.Tensor, t
             f"Expected one token count per expert, got {tokens_per_expert.numel()} counts for {weight.size(0)} experts."
         )
     if input.dtype not in (torch.float16, torch.bfloat16) or weight.dtype != input.dtype:
-        raise TypeError(f"MATE grouped GEMM requires matching fp16/bf16 tensors, got {input.dtype=} and {weight.dtype=}.")
+        raise TypeError(
+            f"MATE grouped GEMM requires matching fp16/bf16 tensors, got {input.dtype=} and {weight.dtype=}."
+        )
 
 
 def _eager_grouped_forward(input: torch.Tensor, weight: torch.Tensor, split_sizes: list[int]) -> torch.Tensor:
@@ -69,38 +89,7 @@ def _eager_grouped_forward(input: torch.Tensor, weight: torch.Tensor, split_size
     return input.new_empty((0, weight.size(1)))
 
 
-def _should_use_mate_grouped_linear(input: torch.Tensor, weight: torch.Tensor, split_sizes: list[int]) -> bool:
-    if input.device.type != "musa":
-        return False
-    if input.numel() == 0 or not any(split_sizes):
-        return False
-
-    min_tokens = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_TOKENS", "128"))
-    min_k = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_K", "128"))
-    min_n = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_N", "64"))
-    return input.size(0) >= min_tokens and input.size(1) >= min_k and weight.size(1) >= min_n
-
-
-def _mate_grouped_forward(input: torch.Tensor, weight: torch.Tensor, split_sizes: list[int]) -> torch.Tensor:
-    if not _should_use_mate_grouped_linear(input, weight, split_sizes):
-        return _eager_grouped_forward(input, weight, split_sizes)
-
-    ragged_m_moe_gemm_16bit = _mate_grouped_gemm_api()
-    output = torch.empty((input.size(0), weight.size(1)), device=input.device, dtype=input.dtype)
-    tokens_per_expert = torch.tensor(split_sizes, device=input.device, dtype=torch.int32)
-    ragged_m_moe_gemm_16bit(
-        input.contiguous(),
-        weight.contiguous(),
-        tokens_per_expert,
-        output,
-        gemm_mode="per_expert",
-        major_a_mode="K",
-        major_b_mode="K",
-    )
-    return output
-
-
-def _grouped_weight_grad(
+def _eager_grouped_weight_grad(
     input: torch.Tensor,
     grad_output: torch.Tensor,
     split_sizes: list[int],
@@ -118,7 +107,103 @@ def _grouped_weight_grad(
     return grad_weight
 
 
+def _should_use_mate_grouped_linear(input: torch.Tensor, weight: torch.Tensor, split_sizes: list[int]) -> bool:
+    """Whether to call MATE kernels.
+
+    Defaults match TE behavior (always use the vendor kernel on MUSA when there
+    is work to do). Thresholds remain overridable for debugging.
+    """
+    if input.device.type != "musa":
+        return False
+    if input.numel() == 0 or not any(split_sizes):
+        return False
+
+    # Default 1: effectively always-on for real training shapes. Set higher via
+    # env only when intentionally forcing an eager fallback.
+    min_tokens = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_TOKENS", "1"))
+    min_k = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_K", "1"))
+    min_n = int(os.getenv("OPENSEARCH_MATE_GROUPED_GEMM_MIN_N", "1"))
+    return input.size(0) >= min_tokens and input.size(1) >= min_k and weight.size(1) >= min_n
+
+
+def _should_use_mate_weight_grad(input: torch.Tensor, grad_output: torch.Tensor, split_sizes: list[int]) -> bool:
+    """ragged_k kernels are sensitive to tiny / poorly-aligned shapes."""
+    if input.device.type != "musa":
+        return False
+    if input.numel() == 0 or grad_output.numel() == 0 or not any(split_sizes):
+        return False
+
+    # Production MoE dims are large; keep a conservative floor so unit-sized
+    # smoke tensors can still fall back to eager without killing the device.
+    min_tokens = int(os.getenv("OPENSEARCH_MATE_GROUPED_WGRAD_MIN_TOKENS", "64"))
+    min_k = int(os.getenv("OPENSEARCH_MATE_GROUPED_WGRAD_MIN_K", "64"))
+    min_n = int(os.getenv("OPENSEARCH_MATE_GROUPED_WGRAD_MIN_N", "64"))
+    return input.size(0) >= min_tokens and input.size(1) >= min_k and grad_output.size(1) >= min_n
+
+
+def _mate_grouped_forward(input: torch.Tensor, weight: torch.Tensor, split_sizes: list[int]) -> torch.Tensor:
+    if not _should_use_mate_grouped_linear(input, weight, split_sizes):
+        return _eager_grouped_forward(input, weight, split_sizes)
+
+    ragged_m_moe_gemm_16bit = _mate_ragged_m_api()
+    output = torch.empty((input.size(0), weight.size(1)), device=input.device, dtype=input.dtype)
+    tokens_per_expert = torch.tensor(split_sizes, device=input.device, dtype=torch.int32)
+    ragged_m_moe_gemm_16bit(
+        input.contiguous(),
+        weight.contiguous(),
+        tokens_per_expert,
+        output,
+        gemm_mode="per_expert",
+        major_a_mode="K",
+        major_b_mode="K",
+    )
+    return output
+
+
+def _mate_grouped_input_grad(
+    grad_output: torch.Tensor,
+    weight: torch.Tensor,
+    split_sizes: list[int],
+) -> torch.Tensor:
+    # dX = dY @ W  <=>  ragged_m(dY, W^T) with W: [E, N, K] -> W^T: [E, K, N]
+    return _mate_grouped_forward(grad_output, weight.transpose(1, 2).contiguous(), split_sizes)
+
+
+def _mate_grouped_weight_grad(
+    input: torch.Tensor,
+    grad_output: torch.Tensor,
+    split_sizes: list[int],
+    weight: torch.Tensor,
+) -> torch.Tensor:
+    """dW[e] = dY[e]^T @ X[e] via MATE K-grouped GEMM (same role as TE layout=NT)."""
+    if not _should_use_mate_weight_grad(input, grad_output, split_sizes):
+        return _eager_grouped_weight_grad(input, grad_output, split_sizes, weight)
+
+    ragged_k_moe_gemm_16bit = _mate_ragged_k_api()
+    # ragged_k expects:
+    #   a: (total_tokens, N), b: (total_tokens, K), out: (E, N, K)  [fp32 or bf16]
+    # Prefer fp32 accumulation for numerical parity with TE / eager refs.
+    grad_weight = torch.zeros(
+        (weight.size(0), weight.size(1), weight.size(2)),
+        device=weight.device,
+        dtype=torch.float32,
+    )
+    tokens_per_expert = torch.tensor(split_sizes, device=input.device, dtype=torch.int32)
+    ragged_k_moe_gemm_16bit(
+        grad_output.contiguous(),
+        input.contiguous(),
+        tokens_per_expert,
+        grad_weight,
+        gemm_mode="per_expert",
+        major_a_mode="M",
+        major_b_mode="N",
+    )
+    return grad_weight.to(dtype=weight.dtype)
+
+
 class _MateGroupedLinear(torch.autograd.Function):
+    """Autograd bridge around MATE ragged_m / ragged_k grouped GEMM APIs."""
+
     @staticmethod
     def forward(ctx, input: torch.Tensor, weight: torch.Tensor, tokens_per_expert: torch.Tensor) -> torch.Tensor:
         _validate_grouped_linear_inputs(input, weight, tokens_per_expert)
@@ -136,9 +221,9 @@ class _MateGroupedLinear(torch.autograd.Function):
         grad_input = grad_weight = None
 
         if ctx.needs_input_grad[0]:
-            grad_input = _mate_grouped_forward(grad_output, weight.transpose(1, 2).contiguous(), ctx.split_sizes)
+            grad_input = _mate_grouped_input_grad(grad_output, weight, ctx.split_sizes)
         if ctx.needs_input_grad[1]:
-            grad_weight = _grouped_weight_grad(input, grad_output, ctx.split_sizes, weight)
+            grad_weight = _mate_grouped_weight_grad(input, grad_output, ctx.split_sizes, weight)
 
         return grad_input, grad_weight, None
 
@@ -153,7 +238,7 @@ def mate_grouped_gemm_experts_forward(
     top_k_index: torch.Tensor,
     top_k_weights: torch.Tensor,
 ) -> torch.Tensor:
-    r"""Qwen3-VL-MoE experts forward using MATE grouped GEMM."""
+    r"""Qwen3-VL-MoE experts forward using MATE grouped GEMM (fwd + full bwd)."""
     device = hidden_states.device
     num_top_k = top_k_index.size(-1)
     num_tokens = hidden_states.size(0)
@@ -223,5 +308,7 @@ class MateGroupedGemmKernel(BaseKernel):
         if not patched_experts:
             raise RuntimeError("No Qwen3VLMoeTextExperts modules were found to patch.")
 
-        logger.info_rank0(f"Applied MATE grouped GEMM to {patched_experts} Qwen3-VL-MoE expert modules.")
+        logger.info_rank0(
+            f"Applied MATE grouped GEMM (fwd+dX+dW) to {patched_experts} Qwen3-VL-MoE expert modules."
+        )
         return model
