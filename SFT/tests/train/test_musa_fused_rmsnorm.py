@@ -41,6 +41,10 @@ def test_qwen3_vl_moe_fused_rmsnorm_patch_and_backward(monkeypatch: pytest.Monke
     monkeypatch.setenv("OPENSEARCH_MUSA_FUSED_RMSNORM", "1")
     hidden_size = 2048
     norm = modeling_qwen3_vl_moe.Qwen3VLMoeTextRMSNorm(hidden_size).to(device="musa", dtype=torch.bfloat16)
+    expected_norm = modeling_qwen3_vl_moe.Qwen3VLMoeTextRMSNorm(hidden_size).to(
+        device="musa", dtype=torch.bfloat16
+    )
+    expected_norm.load_state_dict(norm.state_dict())
 
     class FakeModel:
         config = SimpleNamespace(model_type="qwen3_vl_moe")
@@ -51,13 +55,20 @@ def test_qwen3_vl_moe_fused_rmsnorm_patch_and_backward(monkeypatch: pytest.Monke
 
     assert patch_qwen3_vl_moe_fused_rmsnorm(FakeModel()) == 1
 
-    hidden_states = torch.randn(1, 4097, hidden_size, device="musa", dtype=torch.bfloat16, requires_grad=True)
-    actual = norm(hidden_states)
-    expected = apply_rms_norm_eager(norm, hidden_states)
+    hidden_states = torch.randn(1, 1025, hidden_size, device="musa", dtype=torch.bfloat16)
+    actual_input = hidden_states.clone().requires_grad_(True)
+    expected_input = hidden_states.clone().requires_grad_(True)
+    grad_output = torch.randn_like(hidden_states)
+
+    actual = norm(actual_input)
+    expected = apply_rms_norm_eager(expected_norm, expected_input)
 
     assert torch.isfinite(actual).all()
     torch.testing.assert_close(actual, expected, rtol=0, atol=0.0625)
 
-    actual.float().square().mean().backward()
-    assert hidden_states.grad is not None and torch.isfinite(hidden_states.grad).all()
+    actual.backward(grad_output)
+    expected.backward(grad_output)
+    assert actual_input.grad is not None and torch.isfinite(actual_input.grad).all()
     assert norm.weight.grad is not None and torch.isfinite(norm.weight.grad).all()
+    torch.testing.assert_close(actual_input.grad, expected_input.grad, rtol=0.01, atol=0.0625)
+    torch.testing.assert_close(norm.weight.grad, expected_norm.weight.grad, rtol=0.01, atol=0.5)

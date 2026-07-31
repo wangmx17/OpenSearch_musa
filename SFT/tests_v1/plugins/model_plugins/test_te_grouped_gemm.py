@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import importlib.util
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -62,7 +63,7 @@ def test_te_grouped_linear_forward_backward(token_counts):
     torch.testing.assert_close(actual_grads[1], expected_grads[1], atol=0.01, rtol=0.01)
 
 
-def test_te_grouped_experts_avoid_musa_bincount():
+def test_te_grouped_experts_avoid_musa_bincount(monkeypatch: pytest.MonkeyPatch):
     from llamafactory.v1.plugins.model_plugins.kernels.ops.mlp.te_grouped_gemm import (
         _expert_token_counts,
         te_grouped_gemm_experts_forward,
@@ -71,6 +72,7 @@ def test_te_grouped_experts_avoid_musa_bincount():
     class Experts:
         num_experts = 128
         act_fn = staticmethod(torch.nn.functional.silu)
+        config = SimpleNamespace(hidden_act="silu")
 
         def __init__(self):
             self.gate_up_proj = 0.02 * torch.randn(128, 64, 64, device="musa", dtype=torch.bfloat16)
@@ -81,6 +83,16 @@ def test_te_grouped_experts_avoid_musa_bincount():
             return self.act_fn(gate) * up
 
     torch.manual_seed(20260726)
+    monkeypatch.setenv("OPENSEARCH_MUSA_FUSED_SWIGLU", "1")
+    original_swish_glu = torch.nn.functional.swish_glu
+    swish_glu_calls = 0
+
+    def counted_swish_glu(*args, **kwargs):
+        nonlocal swish_glu_calls
+        swish_glu_calls += 1
+        return original_swish_glu(*args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "swish_glu", counted_swish_glu)
     hidden_states = torch.randn(1024, 64, device="musa", dtype=torch.bfloat16)
     scores = torch.randn(1024, 128, device="musa", dtype=torch.float32)
     values, indices = torch.sort(scores, dim=-1, descending=True, stable=True)
@@ -93,6 +105,7 @@ def test_te_grouped_experts_avoid_musa_bincount():
 
     experts = Experts()
     actual = te_grouped_gemm_experts_forward(experts, hidden_states, top_k_index, top_k_weights)
+    assert swish_glu_calls == 1
 
     expected = torch.zeros_like(hidden_states)
     expert_mask = torch.nn.functional.one_hot(top_k_index, num_classes=experts.num_experts).permute(2, 1, 0)

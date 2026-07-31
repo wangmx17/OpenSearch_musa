@@ -6,6 +6,7 @@ import types
 
 import torch
 
+from .......model.model_utils.musa_fused_swiglu import apply_swiglu_musa
 from ......accelerator.helper import DeviceType
 from ......utils import logging
 from ......utils.types import HFModel
@@ -21,7 +22,7 @@ def _is_mate_grouped_gemm_available() -> bool:
 
 
 def _mate_grouped_gemm_api():
-    import torch_musa  # noqa: F401
+    import torch_musa  # noqa: F401, I001
     import mate.gemm
 
     return mate.gemm.ragged_m_moe_gemm_16bit
@@ -174,7 +175,11 @@ def mate_grouped_gemm_experts_forward(
         self.gate_up_proj,
         tokens_per_expert,
     )
-    gated_out = self._apply_gate(gate_up_out)
+    gated_out = apply_swiglu_musa(
+        gate_up_out,
+        self.act_fn,
+        hidden_act=getattr(self.config, "hidden_act", None),
+    )
     out_per_sample_grouped = mate_grouped_linear(
         gated_out,
         self.down_proj,

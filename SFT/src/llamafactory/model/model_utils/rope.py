@@ -22,6 +22,7 @@ from types import MethodType
 from typing import TYPE_CHECKING
 
 import torch
+from packaging.version import Version
 
 from ...extras import logging
 from ...extras.constants import RopeScaling
@@ -39,6 +40,12 @@ logger = logging.get_logger(__name__)
 
 def _env_flag(name: str, default: str) -> bool:
     return os.getenv(name, default).lower() not in {"0", "false", "no", "off"}
+
+
+def _is_supported_qwen3_vl_moe_rope_version() -> bool:
+    import transformers
+
+    return Version(transformers.__version__).release[:2] == (5, 2)
 
 
 def _qwen3_vl_moe_rope_forward(self, x: torch.Tensor, position_ids: torch.Tensor):
@@ -93,6 +100,9 @@ def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> tuple[int, bool, bo
     torch_version = torch.__version__.split("+", maxsplit=1)[0]
     if not torch_version.startswith("2.7.") or not hasattr(torch, "musa") or not torch.musa.is_available():
         return 0, False, False
+    if not _is_supported_qwen3_vl_moe_rope_version():
+        logger.warning_rank0_once("Qwen3-VL-MoE MUSA RoPE patch supports Transformers 5.2.x only; skipped.")
+        return 0, False, False
 
     from transformers.models.qwen3_vl_moe import modeling_qwen3_vl_moe
 
@@ -101,6 +111,11 @@ def patch_qwen3_vl_moe_rope_bmm(model: "PreTrainedModel") -> tuple[int, bool, bo
     patched_modules = 0
     for module in model.modules():
         if isinstance(module, Qwen3VLMoeTextRotaryEmbedding):
+            if not all(
+                hasattr(module, name)
+                for name in ("inv_freq", "mrope_section", "attention_scaling", "apply_interleaved_mrope")
+            ):
+                continue
             forward = torch.no_grad()(modeling_qwen3_vl_moe.dynamic_rope_update(_qwen3_vl_moe_rope_forward))
             module.forward = MethodType(forward, module)
             patched_modules += 1

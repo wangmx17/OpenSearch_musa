@@ -89,9 +89,13 @@ def test_qwen3_vl_moe_fused_rope_preserves_bmm_phase(monkeypatch: pytest.MonkeyP
 @pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")
 def test_musa_fused_rope_supports_gqa_and_backward(monkeypatch: pytest.MonkeyPatch) -> None:
     torch.manual_seed(7)
-    batch_size, sequence_length, head_dim = 1, 2051, 128
-    q = torch.randn(batch_size, 32, sequence_length, head_dim, device="musa", dtype=torch.bfloat16, requires_grad=True)
-    k = torch.randn(batch_size, 4, sequence_length, head_dim, device="musa", dtype=torch.bfloat16, requires_grad=True)
+    batch_size, sequence_length, head_dim = 1, 513, 128
+    q_base = torch.randn(batch_size, 32, sequence_length, head_dim, device="musa", dtype=torch.bfloat16)
+    k_base = torch.randn(batch_size, 4, sequence_length, head_dim, device="musa", dtype=torch.bfloat16)
+    q = q_base.clone().requires_grad_(True)
+    k = k_base.clone().requires_grad_(True)
+    q_reference = q_base.clone().requires_grad_(True)
+    k_reference = k_base.clone().requires_grad_(True)
     position = torch.arange(sequence_length, device="musa", dtype=torch.float32)
     inv_freq = 1.0 / (5_000_000.0 ** (torch.arange(0, head_dim, 2, device="musa", dtype=torch.float32) / head_dim))
     freq_half = torch.outer(position, inv_freq)
@@ -113,14 +117,22 @@ def test_musa_fused_rope_supports_gqa_and_backward(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(torch, "rope", counted_rope)
     q_actual, k_actual = apply_rotary_pos_emb_musa(q, k, cos, sin)
     q_expected, k_expected = apply_rotary_pos_emb_eager(
-        q.float(), k.float(), cos_fp32.unsqueeze(0), sin_fp32.unsqueeze(0)
+        q_reference.float(), k_reference.float(), cos_fp32.unsqueeze(0), sin_fp32.unsqueeze(0)
     )
 
     assert rope_calls == 2
     torch.testing.assert_close(q_actual, q_expected.to(torch.bfloat16), rtol=0, atol=0.02)
     torch.testing.assert_close(k_actual, k_expected.to(torch.bfloat16), rtol=0, atol=0.02)
 
-    loss = q_actual.float().square().mean() + k_actual.float().square().mean()
-    loss.backward()
-    assert q.grad is not None and torch.isfinite(q.grad).all()
-    assert k.grad is not None and torch.isfinite(k.grad).all()
+    q_grad_output = torch.randn_like(q_actual)
+    k_grad_output = torch.randn_like(k_actual)
+    actual_grads = torch.autograd.grad((q_actual, k_actual), (q, k), (q_grad_output, k_grad_output))
+    expected_grads = torch.autograd.grad(
+        (q_expected, k_expected),
+        (q_reference, k_reference),
+        (q_grad_output.float(), k_grad_output.float()),
+    )
+    assert torch.isfinite(actual_grads[0]).all()
+    assert torch.isfinite(actual_grads[1]).all()
+    torch.testing.assert_close(actual_grads[0], expected_grads[0], rtol=0, atol=0.02)
+    torch.testing.assert_close(actual_grads[1], expected_grads[1], rtol=0, atol=0.02)

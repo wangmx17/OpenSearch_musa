@@ -221,7 +221,9 @@ export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
 # Keep Qwen3-VL-MoE routing deterministic on torch-musa 2.7.x.
 export OPENSEARCH_MUSA_STABLE_MOE_TOPK="${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}"
 export OPENSEARCH_MUSA_FUSED_RMSNORM="${OPENSEARCH_MUSA_FUSED_RMSNORM:-1}"
-# Default to the precision-safe frequency backend. Set to 0 for BMM + fused RoPE A/B runs.
+# Fuse the contiguous gate/up projection in Qwen3-VL-MoE experts; set to 0 for rollback.
+export OPENSEARCH_MUSA_FUSED_SWIGLU="${OPENSEARCH_MUSA_FUSED_SWIGLU:-1}"
+# TF32 is disabled below, so use BMM by default; set to 1 to force the broadcast-mul workaround.
 export OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND="${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-0}"
 # Use the repository-owned runtime patch; set to 0 for an eager-RoPE A/B rollback.
 export OPENSEARCH_MUSA_FUSED_ROPE="${OPENSEARCH_MUSA_FUSED_ROPE:-1}"
