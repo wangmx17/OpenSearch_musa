@@ -1,200 +1,132 @@
 # MATE grouped GEMM 接入说明
 
-本文只说明本分支新增的 MATE grouped GEMM 接入原理、配置方式、验证结果和
-安装包获取方式。TE grouped GEMM 是原有能力，TE 的接入与使用说明请参考项目
-已有 TE 文档，本文不重复展开。
+本文说明 Qwen3-VL-MoE expert MLP 的 MATE grouped GEMM 接入原理、配置方式和验证方法。
+TE grouped GEMM 是原有能力；MATE 作为独立 kernel 接入，通过同一个 YAML 字段进行切换。
 
 ## 1. 接入目标
 
-Qwen3-VL-MoE 的 expert MLP 会根据 router 的结果，把 token 分配到不同 expert。
-每个 expert 都要执行一次矩阵乘法，因此一次 MoE 层实际上包含多个不同 token
-数量的 GEMM。MATE 的 grouped GEMM 接口可以把这些按 expert 分组的矩阵乘法
-交给 MUSA kernel 执行，减少 Python 层逐 expert 调度的开销。
+Qwen3-VL-MoE 的 expert MLP 会根据 router 结果把 token 分配到不同 expert。每个 expert
+都要执行 gate/up projection 和 down projection，因此一次 MoE 层包含多组 token 数可能不同
+的 GEMM。
 
-本分支新增独立的 `mate_grouped_gemm` kernel，不替换或修改原有
-`te_grouped_gemm` 实现。两条路径通过同一个 YAML 参数选择，便于在相同数据、
-模型和训练超参数下进行性能与数值对比。
+MATE grouped GEMM 的目标是把这些按 expert 分组的矩阵乘交给 MUSA kernel 执行，减少逐
+expert eager matmul 的调度开销，并与既有 TE grouped GEMM 路径保持相同的调用语义。
 
-## 2. MATE 接入原理
-
-代码位于：
+## 2. 代码位置
 
 ```text
 src/llamafactory/v1/plugins/model_plugins/kernels/ops/mlp/mate_grouped_gemm.py
+src/llamafactory/v1/plugins/model_plugins/kernels/ops/mlp/te_grouped_gemm.py
 ```
 
-一次 expert 前向的主要步骤如下：
-
-1. 从 `top_k_index` 取得每个 token 被路由到的 expert ID，从 `top_k_weights`
-   取得对应的 router 权重。
-2. 按 expert ID 对 token 排序，把属于同一个 expert 的 token 放在连续区域，
-   同时统计 `tokens_per_expert`。
-3. 将排序后的 token、expert 权重和每个 expert 的 token 数量传给
-   `mate.gemm.ragged_m_moe_gemm_16bit`，执行 gate/up projection 和 down
-   projection 的 grouped GEMM。
-4. 将 token 恢复到原始顺序，乘以 router 权重，并合并每个 token 的 top-k
-   expert 输出。
-
-`ragged_m_moe_gemm_16bit` 的核心输入可以概括为：
-
-```text
-连续排列的 token + [num_experts, N, K] 的 expert 权重
-                  + 每个 expert 的 token 数量
-                  -> 连续排列的 grouped GEMM 输出
-```
-
-### 反向计算说明
-
-当前接入使用自定义 `torch.autograd.Function` 保持训练图完整：
-
-- forward 使用 MATE 的 `ragged_m_moe_gemm_16bit`；
-- `grad_input` 复用 MATE grouped GEMM，使用转置后的 expert 权重计算输入梯度；
-- `grad_weight` 当前按 expert 切分后调用矩阵乘法计算，并不是声明 MATE 提供了
-  一个完整的自动求导 wrapper。
-
-因此，当前版本是“MATE 加速 forward 和 input-gradient，weight-gradient
-保留明确的逐 expert 计算”的接入方案。评估训练性能时应使用完整的
-forward + backward + optimizer step，而不能只测 forward。
-
-### 小规模输入回退
-
-代码会在以下情况回退到 eager grouped 计算：
-
-- 当前设备不是 MUSA；
-- 输入为空或所有 expert 都没有 token；
-- token 数、输入 K 维度或输出 N 维度低于当前实现的阈值。
-
-默认阈值可以通过以下环境变量调整：
-
-```bash
-OPENSEARCH_MATE_GROUPED_GEMM_MIN_TOKENS=128
-OPENSEARCH_MATE_GROUPED_GEMM_MIN_K=128
-OPENSEARCH_MATE_GROUPED_GEMM_MIN_N=64
-```
-
-这些阈值只影响 MATE kernel 是否启用，不改变 YAML 中的 kernel 选择语义。
-
-## 3. YAML 配置切换
-
-原有 TE 路径：
-
-```yaml
-v1_kernel_ids: te_grouped_gemm
-```
-
-MATE 路径：
+MATE kernel ID：
 
 ```yaml
 v1_kernel_ids: mate_grouped_gemm
 ```
 
-切换只修改训练 YAML 的 `v1_kernel_ids`，不需要修改 Python 代码或启动脚本。
-MATE kernel 会在模型加载阶段注册，并只对 `Qwen3VLMoeTextExperts` 模块应用
-替代 forward。
+TE kernel ID：
 
-如果环境缺少 MATE 或 `torch_musa`，选择 `mate_grouped_gemm` 时应直接报出依赖
-错误，而不是静默地把 MATE 配置当成 TE 使用。
+```yaml
+v1_kernel_ids: te_grouped_gemm
+```
 
-## 4. 已验证版本
+## 3. 训练侧接线
 
-本分支在 JD MUSA 测试环境中验证的 MATE 包为：
+训练 YAML 开启 `mate_grouped_gemm` 后，kernel registry 会在模型加载阶段执行
+`MateGroupedGemmKernel.apply`，遍历模型中的 `Qwen3VLMoeTextExperts` 模块，并将其
+`forward` patch 成 MATE 版本。
+
+MATE forward 的主要步骤：
+
+1. 从 `top_k_index` 取得 token 对应的 expert ID，从 `top_k_weights` 取得 router 权重。
+2. 按 expert ID 排序 token，使同一个 expert 的 token 连续排列。
+3. 统计 `tokens_per_expert`，长度为 `num_experts`。
+4. 调用 `mate_grouped_linear` 计算 gate/up projection。
+5. 执行 gate activation。
+6. 再调用 `mate_grouped_linear` 计算 down projection。
+7. 乘 router 权重，恢复 token 原顺序，并对 top-k expert 输出求和。
+
+核心 grouped linear 输入形状：
 
 ```text
-mate 0.2.1+mu437
+input:             [total_routed_tokens, K]
+weight:            [num_experts, N, K]
+tokens_per_expert: [num_experts]
+output:            [total_routed_tokens, N]
 ```
 
-对应发布包为：
+## 4. MATE 与 TE 的计算对应
+
+当前 MATE 实现对齐 TE 的 full grouped GEMM 路径：
 
 ```text
-mate_0.2.1.PH1.tar.gz
+forward: ragged_m_moe_gemm_16bit(X, W, counts)
+dX:      ragged_m_moe_gemm_16bit(dY, W.transpose(1, 2), counts)
+dW:      ragged_k_moe_gemm_16bit(dY, X, counts)
 ```
 
-发布目录使用 MUSA SDK 4.3.7：
+其中：
+
+- `ragged_m_moe_gemm_16bit` 用于 forward 和 input gradient。
+- `ragged_k_moe_gemm_16bit` 用于 weight gradient。
+- dW 不再默认走逐 expert eager matmul；只有在过小 shape 或非 MUSA 设备等条件下才回退。
+
+## 5. 小 shape 回退
+
+生产训练 shape 默认会走 MATE。为了避免极小 shape 触发底层 ragged-k 不稳定路径，dW 保留
+可配置阈值：
+
+```bash
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_TOKENS=1
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_K=1
+OPENSEARCH_MATE_GROUPED_GEMM_MIN_N=1
+OPENSEARCH_MATE_GROUPED_WGRAD_MIN_TOKENS=64
+OPENSEARCH_MATE_GROUPED_WGRAD_MIN_K=64
+OPENSEARCH_MATE_GROUPED_WGRAD_MIN_N=64
+```
+
+这些环境变量只影响 MATE kernel 是否回退 eager，不改变 YAML 的 kernel 选择语义。
+
+## 6. YAML 示例
+
+MATE 训练配置：
 
 ```text
-musa/external/4.3.7/deb/others/
+examples/agentic_full/qwen3_vl_full_sft_30_3b_mate_groupgemm.yaml
 ```
 
-MATE 的 JIT 运行还需要同一发布目录中的配套 `tvm.tar.gz`。本次安装包中
-验证到的关键配套包包括：
+关键字段：
+
+```yaml
+experts_implementation: eager
+v1_kernel_ids: mate_grouped_gemm
+```
+
+`experts_implementation: eager` 保持 Transformers 侧专家实现选择；真正切换 TE/MATE 的是
+`v1_kernel_ids`。
+
+## 7. 验证
+
+路径和数值验证：
+
+```bash
+PYTHONPATH=src python3 scripts/verify_mate_full_groupgemm.py
+```
+
+期望：
 
 ```text
-apache_tvm_ffi-0.1.9.post3.dev0+musa.1...whl
-torch_c_dlpack_ext-0.1.5-*.whl
+ragged_m >= 2
+ragged_k == 1
+eager_wgrad == 0
 ```
 
-具体 wheel 文件名可能随构建日期变化，应以解包后的实际文件名为准。
-
-## 5. 获取与安装
-
-### 方式一：wget
+严格 TE/MATE 对照 UT：
 
 ```bash
-mkdir -p /tmp/mate_install
-cd /tmp/mate_install
-wget https://sh-moss.mthreads.com/sw-release/musa/external/4.3.7/deb/others/mate_0.2.1.PH1.tar.gz
-wget https://sh-moss.mthreads.com/sw-release/musa/external/4.3.7/deb/others/tvm.tar.gz
+PYTHONPATH=src python3 scripts/bench_te_vs_mate_strict_ut.py
 ```
 
-`mate_0.2.1.PH1.tar.gz` 是发布归档，内部包含 wheel，不能直接把 tar.gz
-当作标准 Python 源码包安装：
-
-```bash
-tar -xzf mate_0.2.1.PH1.tar.gz
-python3 -m pip install --no-cache-dir ./mate-0.2.1+mu437-py3-none-any.whl
-```
-
-安装配套 JIT 依赖：
-
-```bash
-mkdir -p /tmp/mate_tvm_install
-tar -xzf tvm.tar.gz -C /tmp/mate_tvm_install
-python3 -m pip install --no-cache-dir \
-  /tmp/mate_tvm_install/torch_c_dlpack_ext-*.whl \
-  /tmp/mate_tvm_install/apache_tvm_ffi-*.whl
-```
-
-### 方式二：mc
-
-如果使用 MOSS 官方 `mc` 入口，先按官方凭据管理方式配置临时 alias；不要把
-access key、secret key 写入代码仓库、脚本或本文档：
-
-```bash
-mc alias set sh-moss https://sh-moss.mthreads.com '<ACCESS_KEY>' '<SECRET_KEY>'
-mc cp sh-moss/sw-release/musa/external/4.3.7/deb/others/mate_0.2.1.PH1.tar.gz ./
-mc cp sh-moss/sw-release/musa/external/4.3.7/deb/others/tvm.tar.gz ./
-```
-
-### 安装后检查
-
-```bash
-python3 - <<'PY'
-import importlib.util
-import mate
-import mate.gemm
-
-print('mate_spec:', importlib.util.find_spec('mate').origin)
-print('mate_version:', getattr(mate, '__version__', '<no __version__>'))
-print('has_ragged_m_moe_gemm:', hasattr(mate.gemm, 'ragged_m_moe_gemm_16bit'))
-PY
-```
-
-预期至少应满足：
-
-```text
-mate_version: 0.2.1+mu437
-has_ragged_m_moe_gemm: True
-```
-
-## 6. 验证建议
-
-安装成功不等于训练路径已经可用，建议按以下顺序验证：
-
-1. 先执行 `import mate`、`import mate.gemm`；
-2. 使用小张量验证 MATE grouped GEMM 输出是 finite，并与 baseline 做误差比较；
-3. 分别使用 `te_grouped_gemm` 和 `mate_grouped_gemm` 的 YAML 跑相同的短训练；
-4. 同时检查 loss、梯度是否 finite、step 时间和完整 forward/backward 时间；
-5. 再进行更长训练和收敛曲线对比。
-
-本分支已在双机 MUSA 测试环境中验证：TE YAML 和 MATE YAML 均能进入正常训练
-流程；MATE 版本记录为 `0.2.1+mu437`。
+该 UT 使用固定 seed、相同输入张量、均匀 `tokens_per_expert`，分别检查 TE 与 MATE 的
+kernel 调用计数、数值误差和 forward/backward 平均耗时。
