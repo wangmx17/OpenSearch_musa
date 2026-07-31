@@ -45,8 +45,8 @@
 
 * DeepSpeed：https://github.com/gliangMT/DeepSpeed
 * docker image:
-  * 公网：registry.mthreads.com/public/ai_devtech/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.0
-  * 机房：dockerhub.kubekey.local/his-test/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.0
+  * 公网：registry.mthreads.com/public/ai_devtech/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.1
+  * 机房：dockerhub.kubekey.local/his-test/training-suite:v2.1.5-rc2-20260704_bundled-jd_qwenvl-v1.1
 
 ```bash
 # install dependencies
