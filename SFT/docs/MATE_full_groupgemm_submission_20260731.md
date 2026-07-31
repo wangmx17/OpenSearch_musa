@@ -19,10 +19,6 @@ YAML 开关选择 MATE grouped GEMM，并覆盖 forward、input gradient 和 wei
 - 新增验证脚本：
   - `scripts/verify_mate_full_groupgemm.py`
   - `scripts/bench_te_vs_mate_strict_ut.py`
-- 新增 MATE 启动 wrapper：
-  - `train_30b_mate_groupgemm.sh`
-  - `launch_mate_groupgemm.sh`
-  - wrapper 只固定默认 MATE yaml，不提交具体集群 hostfile。
 - 新增/更新文档：
   - `docs/MATE_group_gemm_notes.md`
   - `docs/MATE_installation_and_TE_comparison.md`
@@ -48,6 +44,9 @@ PYTHONPATH=src python3 scripts/bench_te_vs_mate_strict_ut.py
 v1_kernel_ids: mate_grouped_gemm
 ```
 
+如果需要复现实验训练，直接使用现有 `train_30b_trace.sh` 链路并显式传入
+`YAML_CONFIG=examples/agentic_full/qwen3_vl_full_sft_30_3b_mate_groupgemm.yaml` 即可。
+
 ## Review 结论
 
 - MATE 与 TE 的 expert forward 逻辑保持同构：token expand、按 expert 排序、grouped linear、
@@ -55,4 +54,4 @@ v1_kernel_ids: mate_grouped_gemm
 - grouped linear 输入约束为 `input=[M,K]`、`weight=[E,N,K]`、`counts=[E]`，与 TE/MATE 两个
   backend 的接口一致。
 - dW 已从逐 expert eager matmul 升级为 `ragged_k`，并通过 UT 计数检查避免静默 fallback。
-- 本次不提交具体集群 `hostfile.txt`、运行日志、benchmark JSON 结果等环境产物。
+- 本次不提交具体集群 `hostfile.txt`、运行日志、benchmark JSON 结果、以及一键启动 wrapper 等环境产物。
