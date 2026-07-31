@@ -19,6 +19,7 @@ import types
 
 import torch
 
+from .......model.model_utils.musa_fused_swiglu import apply_swiglu_musa
 from ......accelerator.helper import DeviceType
 from ......utils import logging
 from ......utils.types import HFModel
@@ -37,7 +38,7 @@ def _te_grouped_gemm_api():
     # The installed MUSA TE build patches CUDA-named compatibility APIs while
     # importing. Finish torch_musa initialization first so that patching does
     # not race lazy additions to sys.modules.
-    import torch_musa  # noqa: F401
+    import torch_musa  # noqa: F401, I001
 
     from transformer_engine.pytorch.cpp_extensions import general_grouped_gemm
     from transformer_engine.pytorch.module.base import get_multi_stream_cublas_workspace
@@ -215,7 +216,11 @@ def te_grouped_gemm_experts_forward(
         self.gate_up_proj,
         tokens_per_expert,
     )
-    gated_out = self._apply_gate(gate_up_out)
+    gated_out = apply_swiglu_musa(
+        gate_up_out,
+        self.act_fn,
+        hidden_act=getattr(self.config, "hidden_act", None),
+    )
     out_per_sample_grouped = te_grouped_linear(
         gated_out,
         self.down_proj,
