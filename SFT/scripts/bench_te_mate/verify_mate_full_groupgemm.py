@@ -2,7 +2,8 @@
 """Verify MATE grouped GEMM uses ragged_m (fwd/dX) + ragged_k (dW), matching TE roles.
 
 Run inside a MUSA pod / container with mate + torch_musa installed:
-  cd .../OpenSearch_vl_musa/SFT && PYTHONPATH=src python3 scripts/verify_mate_full_groupgemm.py
+  cd .../OpenSearch_vl_musa/SFT
+  PYTHONPATH=src python3 scripts/bench_te_mate/verify_mate_full_groupgemm.py
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ def main() -> int:
 
     # Ensure SFT src is importable
     here = os.path.abspath(os.path.dirname(__file__))
-    sft_root = os.path.abspath(os.path.join(here, ".."))
+    sft_root = os.path.abspath(os.path.join(here, "..", ".."))
     src = os.path.join(sft_root, "src")
     if src not in sys.path:
         sys.path.insert(0, src)

@@ -122,8 +122,8 @@ PY
 
 1. 先确认 `import mate`、`import mate.gemm`、`import torch_musa` 正常。
 2. 确认 `ragged_m_moe_gemm_16bit` 和 `ragged_k_moe_gemm_16bit` 均存在。
-3. 执行 `scripts/verify_mate_full_groupgemm.py` 验证 MATE fwd/dX/dW 调用计数和数值正确性。
-4. 执行 `scripts/bench_te_vs_mate_strict_ut.py` 做 TE/MATE 同输入严格对比。
+3. 执行 `scripts/bench_te_mate/verify_mate_full_groupgemm.py` 验证 MATE fwd/dX/dW 调用计数和数值正确性。
+4. 执行 `scripts/bench_te_mate/bench_te_vs_mate_strict_ut.py` 做 TE/MATE 同输入严格对比。
 5. 最后通过 `v1_kernel_ids: mate_grouped_gemm` 的训练 YAML 做端到端训练验证。
 
 ## 7. 注意事项

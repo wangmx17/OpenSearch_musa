@@ -265,13 +265,10 @@ def main():
     parser.add_argument("--seed", type=int, default=20260727)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
-    parser.add_argument(
-        "--sft-root",
-        default="/home/jd/zman/20260730_qwen3_30b_a3b_sft_mate_full_groupgemm/OpenSearch_vl_musa/SFT",
-    )
+    parser.add_argument("--sft-root", default=None)
     args = parser.parse_args()
 
-    sft = Path(args.sft_root)
+    sft = Path(args.sft_root) if args.sft_root else Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(sft / "src"))
 
     import torch
@@ -374,7 +371,7 @@ def main():
         "sft_root": str(sft),
         "results": results,
     }
-    out_path = sft / "scripts" / "bench_te_vs_mate_strict_result.json"
+    out_path = sft / "scripts" / "bench_te_mate" / "bench_te_vs_mate_strict_result.json"
     out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False))
     print(f"\nWrote {out_path}")
     print("DONE")

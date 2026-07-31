@@ -88,15 +88,9 @@ OPENSEARCH_MATE_GROUPED_WGRAD_MIN_N=64
 
 这些环境变量只影响 MATE kernel 是否回退 eager，不改变 YAML 的 kernel 选择语义。
 
-## 6. YAML 示例
+## 6. YAML 切换方式
 
-MATE 训练配置：
-
-```text
-examples/agentic_full/qwen3_vl_full_sft_30_3b_mate_groupgemm.yaml
-```
-
-关键字段：
+不需要新增单独的 MATE YAML。复现实验时，在现有训练 YAML 中把 kernel ID 改成 MATE 即可：
 
 ```yaml
 experts_implementation: eager
@@ -111,7 +105,7 @@ v1_kernel_ids: mate_grouped_gemm
 路径和数值验证：
 
 ```bash
-PYTHONPATH=src python3 scripts/verify_mate_full_groupgemm.py
+PYTHONPATH=src python3 scripts/bench_te_mate/verify_mate_full_groupgemm.py
 ```
 
 期望：
@@ -125,7 +119,7 @@ eager_wgrad == 0
 严格 TE/MATE 对照 UT：
 
 ```bash
-PYTHONPATH=src python3 scripts/bench_te_vs_mate_strict_ut.py
+PYTHONPATH=src python3 scripts/bench_te_mate/bench_te_vs_mate_strict_ut.py
 ```
 
 该 UT 使用固定 seed、相同输入张量、均匀 `tokens_per_expert`，分别检查 TE 与 MATE 的
