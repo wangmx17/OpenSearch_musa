@@ -5,12 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "${LOG_DIR}"
 
-cd /home/jd/OpenSearch-VL-main/SFT
+cd /mnt/workspace/zhaoji/codes/OpenSearch-VL-main/SFT
 
 pip install -e ".[metrics,deepspeed]" -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install qwen-vl-utils pillow av decord torchvision flash-attn -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install swanlab==0.7.16 -i https://pypi.tuna.tsinghua.edu.cn/simple
-#pip install deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install deepspeed -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install metrics -i https://pypi.tuna.tsinghua.edu.cn/simple
 # pip install metrics
 # pip install peft==0.18.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -56,11 +56,11 @@ echo "[INFO] Writing debug log to ${DEBUG_LOG}"
 echo "[INFO] Experiment log dir: ${EXP_LOG_DIR}"
 
 # ===================== Distributed env =====================
-export WORLD_SIZE=${WORLD_SIZE:-1}
+export WORLD_SIZE=${WORLD_SIZE:-4}
 export RANK=${RANK:-0}
 export MASTER_ADDR=${MASTER_ADDR:-localhost}
 export MASTER_PORT=${MASTER_PORT:-34237}
-export NPROC_PER_NODE=${NPROC_PER_NODE:-8}
+NPROC_PER_NODE=${NPROC_PER_NODE:-8}
 
 # ===================== NCCL =====================
 export NCCL_ASYNC_ERROR_HANDLING=1
@@ -68,7 +68,6 @@ export NCCL_BLOCKING_WAIT=1
 export NCCL_TIMEOUT=7200
 export TORCH_NCCL_TIMEOUT=7200
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
-export MUSA_LAUNCH_BLOCKING=1 
 
 # IB GID detection
 SHOW_GIDS_BIN="${SHOW_GIDS_BIN:-/mnt/workspace/yeshenglong/tmp_0508/show_gids}"
@@ -146,8 +145,7 @@ export VECLIB_MAXIMUM_THREADS=1
 export GOMAXPROCS=8
 export TORCH_NUM_THREADS=1
 export ARROW_NUM_THREADS=1
-export PYTORCH_MUSA_ALLOC_CONF="expandable_segments:True"
-export TORCH_MCCL_AVOID_RECORD_STREAMS=1
+
 # ===================== Launch =====================
 echo "[INFO] Launching multi-node training"
 echo "       Master node: ${MASTER_ADDR}"
@@ -155,10 +153,10 @@ echo "       Nodes total: ${WORLD_SIZE}"
 echo "       GPUs per node: ${NPROC_PER_NODE}"
 echo "       NODE_RANK: ${RANK}"
 
-export PYTHONPATH=/home/jd/OpenSearch-VL-main/SFT/src
-cd /home/jd/OpenSearch-VL-main/SFT
+export PYTHONPATH=/mnt/workspace/zhaoji/codes/OpenSearch-VL-main/SFT/src
+cd /mnt/workspace/zhaoji/codes/OpenSearch-VL-main/SFT
 
-YAML_CONFIG=/home/jd/OpenSearch-VL-main/SFT/examples/agentic_full/qwen3_vl_full_sft_30_3b.yaml
+YAML_CONFIG=/mnt/workspace/zhaoji/codes/OpenSearch-VL-main/SFT/examples/agentic_full/qwen3_vl_full_sft_30_3b.yaml
 DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${RANK}.debug.yaml"
 cp "${YAML_CONFIG}" "${DEBUG_YAML}"
 

@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Unified Efficient Fine-Tuning of 100+ LLMs"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10.0"
+requires-python = ">=3.11.0"
 authors = [
     { name = "hiyouga", email = "hiyouga@buaa.edu.cn" }
 ]

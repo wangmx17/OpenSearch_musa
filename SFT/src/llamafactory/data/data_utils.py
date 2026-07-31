@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import json
-#from enum import StrEnum, unique
-from enum import unique
-from strenum import StrEnum
+from enum import StrEnum, unique
 from typing import TYPE_CHECKING, Any, Optional, TypedDict, Union
 
 import fsspec

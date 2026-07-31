@@ -17,11 +17,7 @@
 
 import json
 from dataclasses import asdict, dataclass, field, fields
-
-
-from typing import Any, Literal
-from typing_extensions import Self
-#from typing import Any, Literal, Self
+from typing import Any, Literal, Self
 
 import torch
 from omegaconf import OmegaConf

@@ -60,8 +60,3 @@ logs/
 *.bak
 *.tmp
 *.orig
-SFT/data/
-
-# MCCL error dumps
-**/.mccl_error.*
-SFT/.mccl_error.*
