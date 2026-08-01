@@ -529,7 +529,32 @@ def create_custom_optimizer(
     training_args: "TrainingArguments",
     finetuning_args: "FinetuningArguments",
 ) -> Optional["torch.optim.Optimizer"]:
-    if os.getenv("OPENSEARCH_USE_MUSA_FUSED_ADAMW", "0").lower() in ["true", "y", "1"]:
+    use_musa_fused_adamw = os.getenv("OPENSEARCH_USE_MUSA_FUSED_ADAMW", "0").lower() in [
+        "true",
+        "y",
+        "1",
+    ]
+    optim_name = getattr(training_args.optim, "value", str(training_args.optim))
+    alternative_optimizer_flags = {
+        "galore": getattr(finetuning_args, "use_galore", False),
+        "apollo": getattr(finetuning_args, "use_apollo", False),
+        "loraplus": getattr(finetuning_args, "loraplus_lr_ratio", None) is not None,
+        "badam": getattr(finetuning_args, "use_badam", False),
+        "adam_mini": getattr(finetuning_args, "use_adam_mini", False),
+        "muon": getattr(finetuning_args, "use_muon", False),
+    }
+    requested_alternatives = [name for name, enabled in alternative_optimizer_flags.items() if enabled]
+    if use_musa_fused_adamw and optim_name != "adamw_torch":
+        logger.warning_rank0(
+            f"OPENSEARCH_USE_MUSA_FUSED_ADAMW only supports optim=adamw_torch, got {optim_name}; "
+            "using the configured optimizer instead."
+        )
+    elif use_musa_fused_adamw and requested_alternatives:
+        logger.warning_rank0(
+            "OPENSEARCH_USE_MUSA_FUSED_ADAMW is incompatible with custom optimizer features "
+            f"{requested_alternatives}; using the configured optimizer instead."
+        )
+    elif use_musa_fused_adamw:
         try:
             from torch_musa.optim import FusedAdamW  # type: ignore
         except Exception as exc:
