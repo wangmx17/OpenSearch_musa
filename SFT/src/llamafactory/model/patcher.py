@@ -32,6 +32,7 @@ from .model_utils.longlora import configure_longlora
 from .model_utils.moe import add_z3_leaf_module, configure_moe, patch_qwen3_vl_moe_stable_router
 from .model_utils.musa_fused_rmsnorm import patch_qwen3_vl_moe_fused_rmsnorm
 from .model_utils.musa_fused_swiglu import patch_qwen3_vl_moe_fused_swiglu
+from .model_utils.musa_sparse_lm_head import patch_qwen3_vl_moe_sparse_lm_head
 from .model_utils.quantization import configure_quantization
 from .model_utils.rope import configure_rope, patch_qwen3_vl_moe_rope_bmm
 from .model_utils.valuehead import prepare_valuehead_model
@@ -231,6 +232,8 @@ def patch_model(
             "Installed the Qwen3-VL-MoE MUSA fused RoPE runtime patch with FP32 phases from "
             f"{frequency_backend}; the first actual fused-kernel call is logged separately."
         )
+    if is_trainable and patch_qwen3_vl_moe_sparse_lm_head(model):
+        logger.info_rank0("Patched Qwen3-VL-MoE lm_head to compute loss only on supervised tokens.")
 
     gen_config = model.generation_config  # check and fix generation config
     if not gen_config.do_sample and (

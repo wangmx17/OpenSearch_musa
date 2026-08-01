@@ -223,6 +223,10 @@ export OPENSEARCH_MUSA_STABLE_MOE_TOPK="${OPENSEARCH_MUSA_STABLE_MOE_TOPK:-1}"
 export OPENSEARCH_MUSA_FUSED_RMSNORM="${OPENSEARCH_MUSA_FUSED_RMSNORM:-1}"
 # Fuse the contiguous gate/up projection in Qwen3-VL-MoE experts; set to 0 for rollback.
 export OPENSEARCH_MUSA_FUSED_SWIGLU="${OPENSEARCH_MUSA_FUSED_SWIGLU:-1}"
+# Compute the large vocabulary projection only for shifted labels that are not
+# masked with -100. Keep disabled until the loss-only integration test passes;
+# set to 1 for an explicit sparse-vs-dense A/B run.
+export OPENSEARCH_MUSA_SPARSE_LM_HEAD="${OPENSEARCH_MUSA_SPARSE_LM_HEAD:-0}"
 # TF32 is disabled below, so use BMM by default; set to 1 to force the broadcast-mul workaround.
 export OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND="${OPENSEARCH_MUSA_ROPE_BMM_WORKAROUND:-0}"
 # Use the repository-owned runtime patch; set to 0 for an eager-RoPE A/B rollback.
@@ -297,6 +301,7 @@ echo "       OPENSEARCH_TRACE_RANKS: ${OPENSEARCH_TRACE_RANKS:-<disabled>}"
 echo "       OPENSEARCH_TRACE_WITH_STACK: ${OPENSEARCH_TRACE_WITH_STACK:-<disabled>}"
 echo "       OPENSEARCH_TRACE_RECORD_SHAPES: ${OPENSEARCH_TRACE_RECORD_SHAPES:-<disabled>}"
 echo "       OPENSEARCH_USE_MUSA_FUSED_ADAMW: ${OPENSEARCH_USE_MUSA_FUSED_ADAMW}"
+echo "       OPENSEARCH_MUSA_SPARSE_LM_HEAD: ${OPENSEARCH_MUSA_SPARSE_LM_HEAD}"
 echo "       Rendezvous mode: static torchrun (--node_rank ${NODE_RANK})"
 echo "[INFO] Using yaml: ${DEBUG_YAML}"
 echo "[DEBUG] MUSA_LAUNCH_BLOCKING=${MUSA_LAUNCH_BLOCKING:-<unset>}"
