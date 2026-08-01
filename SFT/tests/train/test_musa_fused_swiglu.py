@@ -4,6 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from llamafactory.model.model_utils import musa_fused_swiglu as swiglu_impl
 from llamafactory.model.model_utils.musa_fused_swiglu import (
     apply_swiglu_eager,
     apply_swiglu_musa,
@@ -26,6 +27,28 @@ def test_musa_swiglu_falls_back_for_cpu() -> None:
     expected = apply_swiglu_eager(gate_up, F.silu)
 
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")
+def test_musa_swiglu_disables_fused_path_after_kernel_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENSEARCH_MUSA_FUSED_SWIGLU", "1")
+    monkeypatch.setattr(swiglu_impl, "_FUSED_SWIGLU_DISABLED", False)
+    gate_up = torch.randn(8, 64, device="musa", dtype=torch.bfloat16)
+    fused_calls = 0
+
+    def failing_swish_glu(*args, **kwargs):
+        nonlocal fused_calls
+        fused_calls += 1
+        raise RuntimeError("injected fused SwiGLU failure")
+
+    monkeypatch.setattr(F, "swish_glu", failing_swish_glu)
+    expected = apply_swiglu_eager(gate_up, F.silu)
+    first = apply_swiglu_musa(gate_up, F.silu)
+    second = apply_swiglu_musa(gate_up, F.silu)
+
+    assert fused_calls == 1
+    torch.testing.assert_close(first, expected)
+    torch.testing.assert_close(second, expected)
 
 
 @pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")

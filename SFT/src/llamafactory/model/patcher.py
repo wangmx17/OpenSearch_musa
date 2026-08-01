@@ -206,12 +206,14 @@ def patch_model(
     patched_rmsnorm_modules = patch_qwen3_vl_moe_fused_rmsnorm(model)
     if patched_rmsnorm_modules:
         logger.warning_rank0(
-            f"Patched {patched_rmsnorm_modules} Qwen3-VL-MoE text RMSNorm modules to use MUSA fused RMSNorm."
+            f"Installed the MUSA fused RMSNorm runtime patch on {patched_rmsnorm_modules} Qwen3-VL-MoE "
+            "text modules; the first actual fused-kernel call is logged separately."
         )
     patched_swiglu_modules = patch_qwen3_vl_moe_fused_swiglu(model)
     if patched_swiglu_modules:
         logger.warning_rank0(
-            f"Patched {patched_swiglu_modules} Qwen3-VL-MoE expert modules to use MUSA fused SwiGLU."
+            f"Installed the MUSA fused SwiGLU runtime patch on {patched_swiglu_modules} Qwen3-VL-MoE "
+            "expert modules; the first actual fused-kernel call is logged separately."
         )
     patched_routers = patch_qwen3_vl_moe_stable_router(model)
     if patched_routers:
@@ -226,7 +228,8 @@ def patch_model(
     if fused_rope_patched:
         frequency_backend = "broadcast-mul" if broadcast_mul_patched else "BMM"
         logger.warning_rank0(
-            f"Patched Qwen3-VL-MoE text attention to use MUSA fused RoPE with FP32 phases from {frequency_backend}."
+            "Installed the Qwen3-VL-MoE MUSA fused RoPE runtime patch with FP32 phases from "
+            f"{frequency_backend}; the first actual fused-kernel call is logged separately."
         )
 
     gen_config = model.generation_config  # check and fix generation config

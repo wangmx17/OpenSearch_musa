@@ -26,6 +26,8 @@ from ...extras import logging
 logger = logging.get_logger(__name__)
 
 MUSA_ROPE_FREQ_CIS_ATTR = "_opensearch_musa_rope_freq_cis"
+_FUSED_ROPE_DISABLED = False
+_FUSED_ROPE_LOGGED = False
 
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -88,9 +90,12 @@ def apply_rotary_pos_emb_musa(
     Qwen3-VL-MoE uses grouped-query attention, so Q and K intentionally have
     different head counts. They are validated and rotated independently.
     """
+    global _FUSED_ROPE_DISABLED, _FUSED_ROPE_LOGGED
+
     freq_cis = getattr(cos, MUSA_ROPE_FREQ_CIS_ATTR, None)
     fast_path = (
-        hasattr(torch, "rope")
+        not _FUSED_ROPE_DISABLED
+        and hasattr(torch, "rope")
         and q.device.type == "musa"
         and k.device == q.device
         and cos.device == q.device
@@ -118,9 +123,13 @@ def apply_rotary_pos_emb_musa(
     try:
         q_embed = _rope_text_musa(q, freq_cis, unsqueeze_dim)
         k_embed = _rope_text_musa(k, freq_cis, unsqueeze_dim)
+        if not _FUSED_ROPE_LOGGED:
+            logger.info_rank0("MUSA fused RoPE fast path is active.")
+            _FUSED_ROPE_LOGGED = True
         return q_embed.to(dtype=q.dtype), k_embed.to(dtype=k.dtype)
     except Exception as err:
-        logger.warning_rank0_once(f"MUSA fused RoPE fell back to eager: {err}")
+        _FUSED_ROPE_DISABLED = True
+        logger.warning_rank0_once(f"MUSA fused RoPE disabled after kernel failure; using eager fallback: {err}")
         return apply_rotary_pos_emb_eager(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
 
 
