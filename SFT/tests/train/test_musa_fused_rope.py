@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from llamafactory.model.model_utils import musa_fused_rope as rope_impl
 from llamafactory.model.model_utils.musa_fused_rope import (
     MUSA_ROPE_FREQ_CIS_ATTR,
     apply_rotary_pos_emb_eager,
@@ -29,6 +30,35 @@ def test_musa_rope_falls_back_for_cpu_gqa() -> None:
 
     torch.testing.assert_close(actual[0], expected[0])
     torch.testing.assert_close(actual[1], expected[1])
+
+
+@pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")
+def test_musa_rope_disables_fused_path_after_kernel_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rope_impl, "_FUSED_ROPE_DISABLED", False)
+    batch_size, sequence_length, head_dim = 1, 17, 16
+    q = torch.randn(batch_size, 8, sequence_length, head_dim, device="musa", dtype=torch.bfloat16)
+    k = torch.randn(batch_size, 2, sequence_length, head_dim, device="musa", dtype=torch.bfloat16)
+    freq_cis = torch.randn(sequence_length, head_dim, device="musa", dtype=torch.float32)
+    cos = freq_cis.cos().unsqueeze(0).to(torch.bfloat16)
+    sin = freq_cis.sin().unsqueeze(0).to(torch.bfloat16)
+    setattr(cos, MUSA_ROPE_FREQ_CIS_ATTR, freq_cis)
+    fused_calls = 0
+
+    def failing_rope(*args, **kwargs):
+        nonlocal fused_calls
+        fused_calls += 1
+        raise RuntimeError("injected fused RoPE failure")
+
+    monkeypatch.setattr(torch, "rope", failing_rope)
+    expected = apply_rotary_pos_emb_eager(q, k, cos, sin)
+    first = apply_rotary_pos_emb_musa(q, k, cos, sin)
+    second = apply_rotary_pos_emb_musa(q, k, cos, sin)
+
+    assert fused_calls == 1
+    torch.testing.assert_close(first[0], expected[0])
+    torch.testing.assert_close(first[1], expected[1])
+    torch.testing.assert_close(second[0], expected[0])
+    torch.testing.assert_close(second[1], expected[1])
 
 
 @pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")

@@ -28,6 +28,7 @@ from typing_extensions import override
 
 from ...extras import logging
 from ...extras.constants import IGNORE_INDEX
+from ...model.model_utils.musa_sparse_lm_head import sparse_lm_head_loss_only
 from ..callbacks import SaveProcessorCallback
 from ..fp8_utils import configure_fp8_environment, patch_accelerator_for_fp8, verify_fp8_status
 from ..precision_debug import record_precision_loss
@@ -160,7 +161,14 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
             outputs = model(**inputs)
             result = self.compute_loss_func(outputs, inputs["labels"], ref_logits)
         else:
-            result = super().compute_loss(model, inputs, *args, **kwargs)
+            return_outputs = kwargs.get("return_outputs", args[0] if args else False)
+            use_sparse_loss_only = (
+                not return_outputs
+                and getattr(self, "compute_loss_func", None) is None
+                and getattr(self, "label_smoother", None) is None
+            )
+            with sparse_lm_head_loss_only(use_sparse_loss_only):
+                result = super().compute_loss(model, inputs, *args, **kwargs)
 
         record_precision_loss(self, inputs, result)
         return result

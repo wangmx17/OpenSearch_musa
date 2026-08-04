@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.get_logger(__name__)
+_FUSED_RMSNORM_DISABLED = False
+_FUSED_RMSNORM_LOGGED = False
 
 
 def apply_rms_norm_eager(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -41,18 +43,25 @@ def apply_rms_norm_eager(self, hidden_states: torch.Tensor) -> torch.Tensor:
 
 def apply_rms_norm_musa(self, hidden_states: torch.Tensor) -> torch.Tensor:
     """Route MUSA tensors to torch_musa's fused muDNN RMSNorm kernel."""
-    if hidden_states.device.type != "musa" or not hasattr(F, "rms_norm"):
+    global _FUSED_RMSNORM_DISABLED, _FUSED_RMSNORM_LOGGED
+
+    if _FUSED_RMSNORM_DISABLED or hidden_states.device.type != "musa" or not hasattr(F, "rms_norm"):
         return apply_rms_norm_eager(self, hidden_states)
 
     try:
-        return F.rms_norm(
+        output = F.rms_norm(
             hidden_states,
             (hidden_states.shape[-1],),
             self.weight,
             self.variance_epsilon,
         )
+        if not _FUSED_RMSNORM_LOGGED:
+            logger.info_rank0("MUSA fused RMSNorm fast path is active.")
+            _FUSED_RMSNORM_LOGGED = True
+        return output
     except Exception as err:
-        logger.warning_rank0_once(f"MUSA fused RMSNorm fell back to eager: {err}")
+        _FUSED_RMSNORM_DISABLED = True
+        logger.warning_rank0_once(f"MUSA fused RMSNorm disabled after kernel failure; using eager fallback: {err}")
         return apply_rms_norm_eager(self, hidden_states)
 
 

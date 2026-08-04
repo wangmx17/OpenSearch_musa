@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.get_logger(__name__)
+_FUSED_SWIGLU_DISABLED = False
+_FUSED_SWIGLU_LOGGED = False
 
 
 def _env_flag(name: str, default: str) -> bool:
@@ -55,8 +57,11 @@ def apply_swiglu_musa(
     hidden_act: str | None = "silu",
 ) -> torch.Tensor:
     """Consume the contiguous ``[gate, up]`` projection with torch-musa's fused kernel."""
+    global _FUSED_SWIGLU_DISABLED, _FUSED_SWIGLU_LOGGED
+
     if (
-        not _env_flag("OPENSEARCH_MUSA_FUSED_SWIGLU", "0")
+        _FUSED_SWIGLU_DISABLED
+        or not _env_flag("OPENSEARCH_MUSA_FUSED_SWIGLU", "0")
         or hidden_act not in {"silu", "swish"}
         or gate_up.device.type != "musa"
         or not hasattr(F, "swish_glu")
@@ -64,9 +69,14 @@ def apply_swiglu_musa(
         return apply_swiglu_eager(gate_up, act_fn)
 
     try:
-        return F.swish_glu(gate_up)
+        output = F.swish_glu(gate_up)
+        if not _FUSED_SWIGLU_LOGGED:
+            logger.info_rank0("MUSA fused SwiGLU fast path is active.")
+            _FUSED_SWIGLU_LOGGED = True
+        return output
     except Exception as err:
-        logger.warning_rank0_once(f"MUSA fused SwiGLU fell back to eager: {err}")
+        _FUSED_SWIGLU_DISABLED = True
+        logger.warning_rank0_once(f"MUSA fused SwiGLU disabled after kernel failure; using eager fallback: {err}")
         return apply_swiglu_eager(gate_up, act_fn)
 
 

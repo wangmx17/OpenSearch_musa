@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.nn.functional as F
 
+from llamafactory.model.model_utils import musa_fused_rmsnorm as rmsnorm_impl
 from llamafactory.model.model_utils.musa_fused_rmsnorm import (
     apply_rms_norm_eager,
     apply_rms_norm_musa,
@@ -32,6 +34,28 @@ def test_musa_rmsnorm_falls_back_for_cpu() -> None:
     expected = apply_rms_norm_eager(norm, hidden_states)
 
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")
+def test_musa_rmsnorm_disables_fused_path_after_kernel_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rmsnorm_impl, "_FUSED_RMSNORM_DISABLED", False)
+    norm = FakeRMSNorm(32, device="musa", dtype=torch.bfloat16)
+    hidden_states = torch.randn(2, 17, 32, device="musa", dtype=torch.bfloat16)
+    fused_calls = 0
+
+    def failing_rms_norm(*args, **kwargs):
+        nonlocal fused_calls
+        fused_calls += 1
+        raise RuntimeError("injected fused RMSNorm failure")
+
+    monkeypatch.setattr(F, "rms_norm", failing_rms_norm)
+    expected = apply_rms_norm_eager(norm, hidden_states)
+    first = apply_rms_norm_musa(norm, hidden_states)
+    second = apply_rms_norm_musa(norm, hidden_states)
+
+    assert fused_calls == 1
+    torch.testing.assert_close(first, expected)
+    torch.testing.assert_close(second, expected)
 
 
 @pytest.mark.skipif(not _MUSA_AVAILABLE, reason="MUSA device is required")
