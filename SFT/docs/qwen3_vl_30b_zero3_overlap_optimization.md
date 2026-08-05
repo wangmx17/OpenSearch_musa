@@ -11,7 +11,7 @@
 1. **少搬几次。** 增大参数驻留阈值和复用窗口，尽量避免刚取回的参数过早释放、随后又重新 AllGather。
 2. **搬运时继续计算。** 将 `overlap_comm` 从 `false` 改为 `true`，尝试把 ReduceScatter 梯度通信隐藏在反向计算后面。
 
-test5 的 `exp_59` Trace 已经观察到真实的通信/计算重叠，证明机制确实生效；但它和关闭 overlap 的实验不是严格性能配对，因此本文不宣称一个确定的加速百分比。正式生产结论仍需用 micro-batch=1、GA=8、关闭 profiler 的 A/B/A 实验确认。
+test5 的 `exp_59` Trace 已经观察到真实的通信/计算重叠，证明 overlap 机制确实生效；它和关闭 overlap 的实验不是严格性能配对，因此不能据此给 overlap 单独归因。随后针对参数驻留窗口完成了 trace-off GA1 A/B/A 和候选因果 Trace：`stage3_max_live_parameters=1e10`、`stage3_max_reuse_distance=2e10` 在不改变 micro-batch 的条件下通过了 `>=3%` 短筛门，并在正式 GA8 任务前5步通过显存和稳定性健康检查。GA8 仍需继续长跑，本文不会把早期历史对照写成最终生产 A/B 结论。
 
 ## 2. 初学者需要先理解的概念
 
@@ -89,10 +89,12 @@ ZeRO-3 训练中有两类非常重要的集合通信：
 | `allgather_bucket_size` | `1e8` | `5e8` | 提高单次 AllGather 的元素上限 |
 | `stage3_prefetch_bucket_size` | `auto` | `3,774,873` | 固定已验证的提前取参窗口 |
 | `stage3_param_persistence_threshold` | `auto` | `21,233,664` | 让更多较小参数保持不分片驻留 |
-| `stage3_max_live_parameters` | `1e8` | `1e9` | 提高单卡可同时驻留参数元素的上限 |
-| `stage3_max_reuse_distance` | `1e8` | `1e9` | 参数很快会复用时，允许更长时间不释放 |
+| `stage3_max_live_parameters` | `1e8` | `1e10` | 把同时处于 live 状态的参数元素上限提高到100亿 |
+| `stage3_max_reuse_distance` | `1e8` | `2e10` | 参数会在未来约200亿参数元素的遍历距离内复用时，允许暂不释放 |
 
-这些大小的单位是 **parameter elements（参数元素个数）**，不是字节。实际显存还与 dtype、参数分片状态、通信 buffer、allocator、激活值和优化器状态有关，不能简单地把一个数乘以 2 就当成整次训练的显存峰值。
+这些大小的单位是 **parameter elements（参数元素个数）**，不是字节。实际显存还与 dtype、参数分片状态、通信 buffer、allocator、激活值和优化器状态有关，不能简单地把一个数乘以 2 就当成整次训练的显存峰值。`1e10` 和 `2e10` 是 JSON 科学计数法，分别等于 `10,000,000,000` 和 `20,000,000,000`。
+
+表中的“修改前/修改后”表示相对 PR base 的最终差异。最新驻留窗口实验本身使用更严格的单变量口径：A0/A1 为 `live=1e9、reuse=1e9`，B0 只把这一对耦合预算改成 `live=1e10、reuse=2e10`，其余 DeepSpeed、模型、数据、seed、micro-batch 和 GA 均冻结。
 
 配置中 `3,774,873` 和 `21,233,664` 以数字字符串保存，是为了把实验中已经解析出的整数显式冻结下来。exp54、exp55 和 exp59 的运行时 resolved 配置已经确认了这些实际整数值。
 
@@ -148,35 +150,53 @@ DeepSpeed 对该字段的定义是：尝试让梯度 reduction 与 backward comp
 
 exp55 Trace 中 AllGather 每步约 979 次，但 steps 4/5 的近似暴露时间只有 `2.392s / 2.701s`，约 `87%–89%` 已被计算隐藏；`fetch_sub_module` 每步 2459 次，inclusive 时间约 `247–248ms`。因此当前高 persistence 作为冻结基线保留，但不能继续断言“阈值越大越快”，也不再盲目提高到 `1e9`。
 
-### 4.3 `stage3_max_live_parameters: 1e8 -> 1e9`
+### 4.3 `stage3_max_live_parameters: 1e8 -> 1e10`
 
 #### 它控制什么
 
-这是每张卡在释放参数前允许同时保持 live 状态的参数元素上限。上限较小时，DeepSpeed 为控制显存会更早释放参数；上限较大时，可以容纳更多已经取回或即将使用的参数。
+这是每张卡在释放参数前允许同时保持 live 状态的参数元素上限。上限较小时，DeepSpeed 为控制显存会更早释放参数；上限较大时，可以容纳更多已经 AllGather 回来的完整参数，为后续复用保留空间。
 
-#### 为什么可能更快
+它是调度上限，不是启动时直接申请一块 `1e10 × dtype_size` 的连续显存。最终物理峰值由实际同时驻留参数、分片状态、通信 buffer、激活、优化器状态和 allocator 共同决定。
 
-更大的 live window 能减少“预取了参数，却因为上限过小又被迫释放”的情况，也为 prefetch 和 reuse 策略留出空间。
+#### 为什么选择 `1e10`
 
-#### 风险
+exp59 基线 Trace 每个 profiler step 都包含两类主要大参数 AllGather：
 
-`1e9` 是允许上限，不是固定分配量，但它放宽了 DeepSpeed 的显存约束。真实峰值必须采集全部 32 个 rank；只看 rank0 或只看 allocator allocated 都不足以证明安全。
+- `95 × 402,653,184` elements；
+- `95 × 201,326,592` elements。
 
-### 4.4 `stage3_max_reuse_distance: 1e8 -> 1e9`
+两类消息合计约对应每个 text layer `603,979,776` 个大参数元素，并在 forward 与 checkpoint recompute/backward 路径重复出现。`live=1e9` 只能容纳约一个这样的 layer 组合，难以保留更深的尾部层；`live=1e10` 的理论容量约为16个 layer 组合，可以让靠近 forward 尾部的参数跨过重计算边界继续驻留。
+
+这里的16层只是用 Trace 消息尺寸计算出的容量直觉，不代表 DeepSpeed 会机械地固定保留16层。选择 `1e10` 的决定性依据是 trace-off GA1 A/B/A：候选全节点物理峰值从 `39,413 MiB` 增到 `56,546 MiB`，增加 `17,133 MiB`，与事前约 `16.9 GiB/rank` 的额外 BF16 full-parameter 预算一致，同时仍低于 `73,728 MiB` 硬门。
+
+#### 为什么不继续增大
+
+本轮只验证到 `1e10`。更大的 live 上限可能继续提高参数驻留，但会压缩激活、通信 buffer、checkpoint 保存和动态 shape 的安全余量；没有配对性能和全 rank 显存证据时，不采用 `2e10` live，也不把“显存还够”直接等同于“继续增大一定更快”。
+
+### 4.4 `stage3_max_reuse_distance: 1e8 -> 2e10`
 
 #### 它控制什么
 
-DeepSpeed 会估算一个参数距离下次使用还有多远。如果复用距离在阈值内，就尽量暂不释放。提高阈值意味着系统愿意为了未来复用而把参数保留更久。
+DeepSpeed 会沿未来的 module/parameter trace 累加参数元素，估算当前参数距离下次使用还有多远。如果复用距离在阈值内，并且 live 容量仍允许，就尽量暂不释放。提高阈值意味着系统愿意为了未来复用把参数保留更久。
 
-#### 为什么可能更快
+#### 为什么选择 `2e10`
 
-Qwen3-VL MoE 和多模态结构中可能存在跨模块复用或密集的参数访问。如果一个参数刚被释放不久又要使用，就会产生重复 AllGather。更大的 reuse distance 试图避免这种“刚扔掉又捡回来”的通信。
+reuse-distance 衡量的是“从当前使用点到下一次使用点之间遍历了多少参数元素”，不是当前实际驻留量。对于 activation checkpointing，参数可能在 forward 尾部使用后，经过其他模块遍历，再在 recompute/backward 中复用；因此其复用距离可以明显大于同一时刻需要驻留的参数量。
 
-#### 与 max-live 的关系
+本轮把 `reuse=2e10` 与 `live=1e10` 作为一个耦合候选：
 
-reuse-distance 表示“希望保留多久”，max-live 表示“最多能同时保留多少”。只提高 reuse-distance 而不给足 live 上限，保留策略可能仍被容量上限打断；所以当前冻结配置同时把两者设为 `1e9`。
+```text
+reuse=2e10：允许尾部参数跨更长的未来遍历距离继续保留
+live=1e10：限制任何时刻真正允许驻留的总量，承担显存压力阀作用
+```
 
-这两个字段组合后更难单独归因。当前提交保留的是用户已接受并经过短训/Trace 运行的组合基线，不声称已经完成每个字段的独立 A/B。
+`2e10 = 2 × 1e10` 是本模型、当前 checkpoint policy 和当前访问序列下经过 A/B/Trace 验证的实验取值，不是 DeepSpeed 的通用公式。只提高 reuse-distance 而保持较小 live 上限，保留意图仍会被容量门打断；只提高 live 而 reuse-distance 太短，参数仍可能在到达复用点前被释放。因此两项作为一个 Stage3 residency budget 共同验证，不对单个字段拆分宣称收益。
+
+#### 因果证据
+
+候选 exp64 相对 exp59 的三个可配对 Trace step 中，两类目标大 AllGather 都严格从每步 `95` 次降到 `80` 次，各减少15次；`_allgather_base` 从 `977` 次降到 `946` 次。三步 wall 全部同向改善，均值提升 `6.25%`，AllGather exposed 均值下降 `23.15%`，并且目标大 AllGather 没有迁移到 optimizer。
+
+第三个 step 的 ReduceScatter exposed 存在上升，因此该证据只说明“更大 live/reuse 窗口减少了重复参数获取并改善端到端 wall”，不外推为“所有通信等待都改善”。
 
 ### 4.5 `stage3_prefetch_bucket_size: auto -> 3,774,873`
 
@@ -215,9 +235,10 @@ DeepSpeed 通用 ZeRO 配置把它定义为单次 AllGather 的参数元素上�
 - 模型：Qwen3-VL-30B-A3B
 - checkpoint：C100，text 48/48、vision 27/27
 - micro-batch：1
-- Trace 实验：`exp_59`
-- GA：1，仅用于机制和短训筛查
-- global batch：32
+- overlap/驻留基线 Trace：`exp_59`，GA=1、global batch=32
+- 驻留预算 trace-off A/B/A：`exp_61/exp_62/exp_63`，GA=1、global batch=32
+- 驻留候选因果 Trace：`exp_64`，GA=1、global batch=32
+- 正式早期健康检查：`exp_65`，GA=8、global batch=256、profiler off
 
 ### 5.2 exp59 Trace 结果
 
@@ -242,19 +263,58 @@ DeepSpeed 通用 ZeRO 配置把它定义为单次 AllGather 的参数元素上�
 
 注意：kernel 累计时间可以大于 wall time，因为不同 stream 能同时运行；inclusive CPU 等待也可能覆盖 GPU 工作。性能分析必须看时间区间的 union 和 overlap，不能把各项累计时间直接相加。
 
-### 5.3 正确性和稳定性短训
+### 5.3 GA1 trace-off A/B/A：端到端短筛
 
-exp59 共记录 18 步 loss/gradient norm，全部 finite；四个 Pod 均未出现 OOM、MCCL/ProcessGroup timeout、watchdog 或 restart。任务结束后，精确匹配 `logs/exp_59/runtime_trace.yaml` 的进程为 0。
+三臂固定 C100、world size 32、micro-batch=1、GA=1、数据、seed、checkpoint policy、`overlap_comm=true` 和其余 DeepSpeed 配置，只改变耦合的 live/reuse 驻留预算。前2步预热，统计 optimizer steps 3–10：
 
-这证明当前组合至少通过了短训健康检查，但不等于通过长时间生产稳定性测试。特别是 exp59 没有完整的 32-rank allocator/物理显存工件，不能据此宣布显存门已通过。
+| Arm | EXP | live / reuse | steps 3–10 Mean | P50 | P95 | 全节点物理显存峰值 |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| A0 | exp61 | `1e9 / 1e9` | `40.500s` | `40.0s` | `44.6s` | `39,413 MiB` |
+| B0 | exp62 | `1e10 / 2e10` | `37.625s` | `37.0s` | `41.6s` | `56,546 MiB` |
+| A1 | exp63 | `1e9 / 1e9` | `40.375s` | `40.0s` | 约 `44.0s` | `39,413 MiB` |
 
-### 5.4 当前证据不能证明什么
+- B0 相对 A0/A1 的 P50 均提升 `7.5%`，Mean 分别提升 `7.1%/6.8%`；P95 没有恶化。
+- A0/A1 P50 漂移为 `0%`、Mean 漂移约 `0.3%`，基线没有明显漂移。
+- B0 global worst 增加 `17,133 MiB`，仍低于 `73,728 MiB` 硬门并保留约 `17.2 GiB` 设备余量。
+- 三臂 loss/gradient norm 全部 finite；未发现 OOM、hang、watchdog、MCCL/ProcessGroup timeout 或 Pod restart。
 
-- 不能证明 GA=8、global batch=256 下有同样的重叠比例和 step 收益。
-- 不能证明每个 bucket/persistence/live/reuse 字段各自贡献了多少性能。
-- 不能证明所有 32 个 rank 的长尾峰值都满足生产显存门。
-- 不能证明 checkpoint save/load/resume 路径不会因更大聚合或驻留窗口出现峰值问题。
-- 不能把 profiler 下三个 step 的均值当作正式训练吞吐基线。
+因此该耦合候选通过 `GA1 SCREEN GO`。GA1 optimizer step 的工作量不同于 GA8；这里证明的是同语义短筛收益和显存安全性，不是正式收敛结论。
+
+### 5.4 exp64 因果 Trace：为什么会变快
+
+exp64 使用 B0 驻留预算补抓 rank0 Trace，与 exp59 的 `ProfilerStep#2–4` 可按 shape 和 collective 序列配对：
+
+| 指标 | exp59 基线 | exp64 候选 | 变化 |
+| --- | ---: | ---: | ---: |
+| step wall | `42.317/45.755/39.591s` | `39.685/43.243/36.755s` | 三步均改善，Mean提升 `6.25%` |
+| 402,653,184-element AG | `95/step` | `80/step` | `-15/step` |
+| 201,326,592-element AG | `95/step` | `80/step` | `-15/step` |
+| `_allgather_base` | `977/step` | `946/step` | `-31/step` |
+| AG exposed Mean | `2.092s` | `1.607s` | `-23.15%` |
+| ReduceScatter / AllReduce | `492/2 per step` | `492/2 per step` | collective语义不变 |
+
+EventSync、stream wait 和 DeepSpeed record wait 均未增加，两类目标大 AG 在 optimizer 内均为0，说明收益没有简单迁移成 optimizer 尾部等待。三个 step 的全 collective exposed 均值下降 `11.76%`，但第三个 step 的 RS exposed 从 `2.033s` 增至 `3.246s`，所以通信重叠仍有 step 级波动。
+
+该 Trace 完整解析 `9,241,856` 个事件，文件 size 和 SHA256 在远端/本地一致。因果结论是：`live=1e10/reuse=2e10` 让部分尾部参数跨复用边界继续驻留，精确减少了两类大参数的重复 AllGather，并带来超过3%的 wall 收益。
+
+### 5.5 exp65 正式 GA8 早期健康检查
+
+exp65 固定 micro-batch=1、GA=8、world size 32、global batch=256、profiler off，并保留生产 checkpoint 保存语义。前5步结果：
+
+- step2–5 增量约为 `286/295/290/281s`，Mean `288.0s`、P50 `288.0s`；
+- 相对历史 exp54 step2–9 Mean `315.75s` 方向性改善约 `8.8%`；
+- loss 为 `1.020/1.026/1.010/1.023/1.017`，gradient norm 为 `13.88/13.44/13.81/13.69/13.50`，全部 finite；
+- 四节点物理显存峰值为 `58,869/56,793/57,809/59,568 MiB`，global worst `59,568 MiB`，距 `73,728 MiB` 门限仍有 `14,160 MiB`；
+- 四个 Pod 均 Running/Ready、restart=0，未发现 OOM、MCCL/ProcessGroup timeout、watchdog 或 fatal，任务继续长跑。
+
+exp65 与 exp54 不是同轮配对 A/B，数据阶段和运行时状态可能不同，因此 `8.8%` 只作为正式配方下的早期方向性佐证；当前可归因的性能结论仍以 GA1 A/B/A 和 exp64 因果 Trace 为准。
+
+### 5.6 当前证据仍不能证明什么
+
+- 不能把 live/reuse 耦合候选的收益拆分归因到其中单个字段。
+- 不能把 exp65 与历史 exp54 的差值当作严格 GA8 A/B 收益。
+- 不能证明 GA8 长跑、动态 shape 长尾和 checkpoint save/load/resume 已全部通过。
+- 不能把 profiler 下的 kernel 累计时间直接当作 wall time，也不能声称所有通信等待均改善。
 
 ## 6. 为什么这次不修改 micro-batch 和训练语义
 
@@ -264,7 +324,7 @@ GA1 的 optimizer step 只包含 1 个 micro-batch，而正式 GA8 的 optimizer
 
 ## 7. 正式验收方案
 
-正式验证应恢复：
+正式验证固定为：
 
 ```text
 micro-batch = 1
@@ -274,7 +334,7 @@ global batch = 256
 profiler = off
 ```
 
-建议至少执行 A/B/A，并在资源允许时补一轮候选：
+当前 GA1 A0/B0/A1 与因果 Trace 已完成，exp65 GA8 已通过前5步健康门并继续长跑。最终生产验收仍建议在相同节点和数据条件下执行 GA8 A/B/A，并在资源允许时补一轮候选：
 
 ```text
 A0：修改前 ZeRO-3 配置
@@ -307,7 +367,16 @@ B1：再次运行本 PR 配置
 
 ## 8. 回退方式
 
-如果出现性能回退、显存峰值过高、MCCL timeout、hang 或 checkpoint 问题，可以把本文件对应配置恢复为：
+如果只需要回退本轮 `1e10/2e10` 驻留预算，保持 overlap、bucket、prefetch 和 persistence 不变，仅恢复 GA1 A/B/A 的基线：
+
+```json
+{
+  "stage3_max_live_parameters": 1e9,
+  "stage3_max_reuse_distance": 1e9
+}
+```
+
+如果需要完整回退整个 PR 的六项 ZeRO-3 调整，再恢复为 PR base：
 
 ```json
 {
@@ -320,22 +389,24 @@ B1：再次运行本 PR 配置
 }
 ```
 
-回退时不要修改 `stage`、`contiguous_gradients`、`reduce_bucket_size` 或 batch 配置，否则会引入新的实验变量。回退后仍应检查运行时 resolved config，确认 `auto` 在当前软件版本中解析成预期数值。
+回退时不要修改 `stage`、`contiguous_gradients`、`reduce_bucket_size` 或 batch 配置，否则会引入新的实验变量。优先使用两项最小回退，便于判断问题是否来自驻留窗口；完整回退后仍应检查运行时 resolved config，确认 `auto` 在当前软件版本中解析成预期数值。
 
 ## 9. Review checklist
 
 - [ ] PR 只包含 `ds_z3_config_change.json` 和本文档，没有实验脚本、Trace、日志或 checkpoint-policy 工作树代码。
-- [ ] 运行时 resolved 配置与本文表格一致，字符串整数被正确解析。
+- [ ] 运行时 resolved 配置与本文表格一致，科学计数法和字符串整数均被正确解析。
 - [ ] 所有 rank 实际启用了同一份 `overlap_comm=true` 配置。
 - [ ] Trace 证明 RS 与反向计算真实重叠，而不是只移动了等待点。
-- [ ] 没有把 exp55/exp59 当作严格性能 A/B，也没有虚构加速百分比。
+- [ ] 没有把 exp55/exp59 或 exp54/exp65 当作严格性能 A/B；可归因收益只引用 exp61/62/63 与 exp59/64。
+- [ ] exp61/62/63 的 GA1 A/B/A 满足 P50、P95、基线漂移、数值和全节点显存门。
+- [ ] exp64 中两类大 AllGather 均为 `95 -> 80`，且等待没有迁移到 optimizer。
 - [ ] prefetch 2× 的 NO-GO 结论得到保留，没有继续扩大窗口。
 - [ ] 记录全部 32 rank 显存峰值，而不是只看 rank0。
 - [ ] GA8 正式 A/B/A 固定 micro-batch=1、数据、seed、LR、MCCL 和软件版本。
-- [ ] loss、gradient norm、OOM、timeout、watchdog、save/load/resume 全部通过。
-- [ ] 回退只恢复本 PR 的六个 ZeRO-3 字段，不混入其他训练配方修改。
+- [ ] GA8 长跑的 loss、gradient norm、OOM、timeout、watchdog、save/load/resume 全部通过。
+- [ ] 回退优先只恢复 live/reuse；需要完整回退时才恢复本 PR 的六个 ZeRO-3 字段，不混入其他训练配方修改。
 
 ## 10. 参考资料
 
 - [DeepSpeed ZeRO-3 官方文档](https://deepspeed.readthedocs.io/en/stable/zero3.html)：ZeRO-3、`overlap_comm`、prefetch、persistence、max-live、reuse-distance 和 bucket 字段的官方定义。
-- 本 PR 的数据结论来自 `jd-qwen-vl-30b-a3b-test5` 的 exp55/exp59 运行记录和 Trace 离线分析；实验工件不作为生产代码提交。
+- 本 PR 的数据结论来自 `jd-qwen-vl-30b-a3b-test5` 的 exp55、exp59、exp61–exp65 运行记录与 Trace 离线分析；实验工件不作为生产代码提交。
