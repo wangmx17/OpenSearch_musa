@@ -25,8 +25,8 @@
     "reduce_bucket_size": "auto",
     "stage3_prefetch_bucket_size": "3774873",
     "stage3_param_persistence_threshold": "21233664",
-    "stage3_max_live_parameters": 1e10,
-    "stage3_max_reuse_distance": 2e10,
+    "stage3_max_live_parameters": 2e10,
+    "stage3_max_reuse_distance": 4e10,
     "stage3_gather_16bit_weights_on_model_save": true
  }
 }
