@@ -238,6 +238,37 @@ def _check_extra_dependencies(
             check_version("rouge_chinese", mandatory=True)
 
 
+def _validate_autoep_kernel_compatibility(model_args: "ModelArguments", training_args: "TrainingArguments") -> None:
+    r"""Reject expert kernels that AutoEP would replace during DeepSpeed initialization."""
+    ds_config = getattr(training_args, "deepspeed", None)
+    if isinstance(ds_config, (str, os.PathLike)):
+        with open(ds_config, encoding="utf-8") as config_file:
+            ds_config = json.load(config_file)
+    elif not isinstance(ds_config, dict):
+        hf_ds_config = getattr(training_args, "hf_deepspeed_config", None)
+        ds_config = getattr(hf_ds_config, "config", None)
+
+    if not isinstance(ds_config, dict) or not ds_config.get("expert_parallel", {}).get("enabled", False):
+        return
+
+    selected_kernels = model_args.v1_kernel_ids or model_args.use_v1_kernels
+    if not selected_kernels:
+        return
+
+    expert_kernel_ids = {"te_grouped_gemm", "mate_grouped_gemm"}
+    if selected_kernels is True or selected_kernels == "auto":
+        conflicting_kernels = sorted(expert_kernel_ids)
+    else:
+        conflicting_kernels = sorted(expert_kernel_ids.intersection(selected_kernels.split(",")))
+
+    if conflicting_kernels:
+        raise ValueError(
+            "DeepSpeed AutoEP replaces the complete MoE block and cannot be combined with v1 expert kernels "
+            f"{conflicting_kernels}. Remove these IDs from `v1_kernel_ids`; select the AutoEP expert backend in the "
+            "DeepSpeed `expert_parallel` configuration instead."
+        )
+
+
 def _parse_train_args(args: dict[str, Any] | list[str] | None = None) -> _TRAIN_CLS:
     parser = HfArgumentParser(_TRAIN_ARGS)
     allow_extra_keys = is_env_enabled("ALLOW_EXTRA_ARGS")
@@ -398,6 +429,7 @@ def get_train_args(args: dict[str, Any] | list[str] | None = None) -> _TRAIN_CLS
     if model_args.use_kt and is_deepspeed_zero3_enabled():
         raise ValueError("KTransformers is incompatible with DeepSpeed ZeRO-3.")
 
+    _validate_autoep_kernel_compatibility(model_args, training_args)
     _set_env_vars()
     _verify_model_args(model_args, data_args, finetuning_args)
     _check_extra_dependencies(model_args, finetuning_args, training_args)

@@ -280,10 +280,11 @@ export ALLOW_TORCH29_CONV3D=1
 export OPENSEARCH_MUSA_ALLOW_TF32="${OPENSEARCH_MUSA_ALLOW_TF32:-0}"
 export OPENSEARCH_USE_MUSA_FUSED_ADAMW="${OPENSEARCH_USE_MUSA_FUSED_ADAMW:-1}"
 # ===================== Launch =====================
-YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/examples/agentic_full/qwen3_vl_full_sft_30_3b_trace.yaml}"
+YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/examples/agentic_full/qwen3_vl_full_sft_30_3b_autoep.yaml}"
+DEEPSPEED_CONFIG="${DEEPSPEED_CONFIG:-examples/deepspeed/ds_z3_autoep_config.json}"
 DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${NODE_RANK}.yaml"
 cp "${YAML_CONFIG}" "${DEBUG_YAML}"
-sed -i 's#^deepspeed: .*#deepspeed: examples/deepspeed/ds_z3_config_change.json#' "${DEBUG_YAML}"
+sed -i "s#^deepspeed: .*#deepspeed: ${DEEPSPEED_CONFIG}#" "${DEBUG_YAML}"
 
 echo "[INFO] Launching multi-node training"
 echo "       Master node: ${MASTER_ADDR}:${MASTER_PORT}"
@@ -303,6 +304,7 @@ echo "       OPENSEARCH_USE_MUSA_FUSED_ADAMW: ${OPENSEARCH_USE_MUSA_FUSED_ADAMW}
 echo "       OPENSEARCH_MUSA_SPARSE_LM_HEAD: ${OPENSEARCH_MUSA_SPARSE_LM_HEAD}"
 echo "       Rendezvous mode: static torchrun (--node_rank ${NODE_RANK})"
 echo "[INFO] Using yaml: ${DEBUG_YAML}"
+echo "[INFO] Using DeepSpeed config: ${DEEPSPEED_CONFIG}"
 echo "[DEBUG] MUSA_LAUNCH_BLOCKING=${MUSA_LAUNCH_BLOCKING:-<unset>}"
 
 # Force the static torchrun branch in llamafactory/launcher.py. This branch
