@@ -250,11 +250,14 @@ export OPENSEARCH_TRACE_PROFILE_MEMORY="${OPENSEARCH_TRACE_PROFILE_MEMORY:-0}"
 export OPENSEARCH_TRACE_WITH_FLOPS="${OPENSEARCH_TRACE_WITH_FLOPS:-0}"
 
 # ===================== Launch =====================
-#适用于z3关blocking
-YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/examples/agentic_full/qwen3_vl_full_sft_30_3b_trace.yaml}"
+# The AutoEP development branch defaults to the GA=8 validation recipe.
+# YAML_CONFIG and DEEPSPEED_CONFIG remain explicit escape hatches for A/B runs.
+YAML_CONFIG="${YAML_CONFIG:-${PROJECT_ROOT}/examples/agentic_full/qwen3_vl_full_sft_30_3b_autoep.yaml}"
 DEBUG_YAML="${EXP_LOG_DIR}/$(basename "${YAML_CONFIG}" .yaml).node_${NODE_RANK}.yaml"
 cp "${YAML_CONFIG}" "${DEBUG_YAML}"
-sed -i 's#^deepspeed: .*#deepspeed: examples/deepspeed/ds_z3_config_change.json#' "${DEBUG_YAML}"
+if [[ -n "${DEEPSPEED_CONFIG:-}" ]]; then
+  sed -i "s#^deepspeed: .*#deepspeed: ${DEEPSPEED_CONFIG}#" "${DEBUG_YAML}"
+fi
 
 unset RDZV_ID
 
